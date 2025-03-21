@@ -33,8 +33,9 @@ async fn main() {
     tokio::task::LocalSet::new()
         .run_until(async move {
             let mut service = Node::new(addr);
+            let server = Server::new(service.clone());
 
-            let server_task = tokio::task::spawn_local(Server::new(service.clone()).run());
+            let server_task = tokio::task::spawn_local(server.run());
 
             let mut client = Client::new(service.clone());
             for node in nodes {

@@ -19,7 +19,6 @@ impl Server {
         let listener = tokio::net::TcpListener::bind(&self.node.addr()).await?;
         let client: raft::Client = capnp_rpc::new_client(self);
         loop {
-        println!("server looping");
             let (stream, _) = listener.accept().await?;
             stream.set_nodelay(true)?;
             let (reader, writer) =
@@ -50,9 +49,16 @@ impl raft::Server for Server {
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let request = pry!(params.get());
         let t = request.get_term();
-        println!("from apprend_entries: current term: {t}");
-        results.get().set_success(false);
-        results.get().set_term(t + 1);
+        let entries = pry!(request.get_entries());
+        if entries.is_empty() {
+            //NOTE: just a heartbeat
+            self.node.update_heartbeat()
+        } else {
+            //NOTE: actual entry to save
+            println!("from apprend_entries: current term: {t}");
+            results.get().set_success(false);
+            results.get().set_term(t + 1);
+        }
         Promise::ok(())
     }
 

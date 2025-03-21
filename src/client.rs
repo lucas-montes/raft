@@ -78,11 +78,9 @@ pub struct Client {
 
 impl Client {
     pub async fn run(mut self) -> Result<(), Err> {
-        let mut interval = tokio::time::interval(Duration::from_secs(2));
+        println!("client running");
         loop {
-            interval.tick().await;
-            println!("client running, in state {:?}", self);
-            match &self.node.role() {
+            match &self.node.role().await {
                 Role::Leader { .. } => self.leader_stage().await,
                 Role::Follower => self.follower_stage().await,
                 Role::Candidate => self.candidate_stage().await,
@@ -100,39 +98,73 @@ impl Client {
 
 impl Client {
     pub async fn add_peer(&mut self, addr: SocketAddr) {
+        println!("adding peer {addr:?}");
         self.peers.push(Peer::new(addr).await);
     }
 
-    async fn send_messages(&mut self) {
-        //        for peer in self.peers.iter_mut() {
-        //            match peer {
-        //                Peer::Up { client, .. } => {
-        //                    let mut request = client.append_entries_request();
-        //                    request.get().set_term(self.node.current_term());
-        //                    let reply = request.send().promise.await;
-        //                    match reply {
-        //                        Ok(r) => {
-        //                            println!("from send_messages: {:?}", r.get());
-        //                        }
-        //                        Err(err) => {
-        //                            println!("from send_messages: {:?}", err);
-        //                            if err.kind == capnp::ErrorKind::Disconnected {
-        //                                println!("from send_messages: {:?}", err);
-        //                            }
-        //                        }
-        //                    }
-        //                }
-        //                Peer::Down(addr) => {
-        //                    println!("peer is down: {:?}", addr);
-        //                }
-        //            }
-        //        }
+    async fn send_heartbeat(
+        request: capnp::capability::Request<
+            raft::append_entries_params::Owned,
+            raft::append_entries_results::Owned,
+        >,
+        client_addr: SocketAddr,
+        index: usize,
+    ) -> Result<(u64, bool), (usize, SocketAddr)> {
+        let reply = request.send().promise.await;
+        println!("sending heartbeat");
+
+        match reply {
+            Ok(r) => match r.get() {
+                Ok(response) => Ok((response.get_term(), response.get_success())),
+                Err(err) => {
+                    println!("error from send_heartbeat getting the response: {:?}", err);
+                    Err((index, client_addr))
+                }
+            },
+            Err(err) => {
+                println!("error from evaluating the reply send_heartbeat: {:?}", err);
+                Err((index, client_addr))
+                //    if err.kind == capnp::ErrorKind::Disconnected {
+            }
+        }
     }
 
     async fn leader_stage(&mut self) {
-        self.send_messages().await;
+        let mut tasks = JoinSet::new();
+        let current_term = self.node.current_term();
+        let node_addr = self.node.addr().to_string();
+        let commit_index = self.node.commit_index();
+        let (last_term, last_index) = self.node.last_log_info();
+
+        for (index, peer) in self.peers.iter().enumerate() {
+            match peer {
+                Peer::Up { client, addr } => {
+                    let mut request = client.append_entries_request();
+                    request.get().set_term(current_term);
+                    request.get().set_leader_id(&node_addr);
+                    request.get().set_prev_log_index(last_index);
+                    request.get().set_prev_log_term(last_term);
+                    request.get().set_leader_commit(commit_index);
+                    request.get().init_entries(0);
+
+                    tasks.spawn_local(Self::send_heartbeat(request, *addr, index));
+                }
+                Peer::Down(addr) => {
+                    println!("peer is down: {:?}", addr);
+                }
+            }
+        }
+
+        while let Some(res) = tasks.join_next().await {
+            if let Ok(r) = res.expect("why joinhandle failed?") {
+                
+            }
+        }
     }
-    async fn follower_stage(&self) {}
+
+    async fn follower_stage(&self) {
+        tokio::time::sleep(Duration::from_millis(25)).await
+    }
 
     async fn send_vote_request(
         mut request: capnp::capability::Request<
@@ -209,7 +241,9 @@ impl Client {
                 votes += r.1;
             }
         }
-        if votes > self.peers.len().div_ceil(2) as u64 {
+        let num_peers = self.peers.len();
+        let has_majority = votes > num_peers.div_ceil(2) as u64;
+        if has_majority || num_peers.eq(&0) {
             self.node.make_leader()
         }
     }

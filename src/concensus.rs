@@ -63,11 +63,15 @@ impl Node {
         }
     }
 
+    pub fn commit_index(&self) -> u64 {
+        self.0.borrow().commit_index
+    }
+
     pub fn voted_for(&self) -> Option<SocketAddr> {
         self.0.borrow().voted_for
     }
 
-    pub fn role(&self) -> Role {
+    pub async fn role(&self) -> Role {
         self.0.borrow().role
     }
 
@@ -98,6 +102,11 @@ impl Node {
     pub fn make_leader(&mut self) {
         self.0.borrow_mut().become_leader()
     }
+
+    pub fn update_heartbeat(&mut self) {
+        println!("beating");
+        self.0.borrow_mut().last_heartbeat = Some(Instant::now());
+    }
 }
 
 struct State {
@@ -113,15 +122,11 @@ struct State {
 
 impl Debug for State {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "role: {:?} current_term: {:?} voted_for: {:?}",
-            self.role, self.current_term, self.voted_for
-        )
+        write!(f, "role: {:?}", self.role)
     }
 }
 impl State {
-    fn start_election(&mut self) {
+    fn become_candidate(&mut self) {
         println!("elections noooow");
         self.role = Role::Candidate;
         self.current_term += 1;
@@ -135,6 +140,7 @@ impl State {
             next_index: last_log + 1,
             match_index: last_log,
         };
+        self.voted_for = None;
     }
 
     fn check_election(&mut self, election_timeout: Duration) {
@@ -143,7 +149,7 @@ impl State {
             .is_none_or(|t| t.elapsed() >= election_timeout)
             && self.role == Role::Follower
         {
-            self.start_election()
+            self.become_candidate()
         }
     }
 }
