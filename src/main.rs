@@ -16,8 +16,8 @@ mod concensus;
 mod server;
 
 fn get_election_timeout() -> Duration {
-    let election_timeout = random_range(150..300);
-    Duration::from_millis(election_timeout)
+    let election_timeout = random_range(1..3);
+    Duration::from_secs(election_timeout)
 }
 
 #[tokio::main(flavor = "current_thread")]

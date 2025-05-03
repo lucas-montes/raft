@@ -156,9 +156,7 @@ impl Client {
         }
 
         while let Some(res) = tasks.join_next().await {
-            if let Ok(r) = res.expect("why joinhandle failed?") {
-                
-            }
+            if let Ok(r) = res.expect("why joinhandle failed?") {}
         }
     }
 
