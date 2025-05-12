@@ -13,11 +13,9 @@ pub mod raft_capnp {
     include!(concat!(env!("OUT_DIR"), "/raft_capnp.rs"));
 }
 
-
 mod client;
 mod concensus;
 mod server;
-
 
 fn get_election_timeout() -> Duration {
     let election_timeout = random_range(3.0..5.0);

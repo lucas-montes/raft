@@ -114,14 +114,13 @@ impl Client {
 
         match reply {
             Ok(r) => match r.get() {
-                Ok(response) => {
-                    match response.get_response(){
-                        Ok(response) => Ok((response.get_term(), response.get_success())),
-                        Err(err) => {
-                            println!("error from send_heartbeat getting the response: {:?}", err);
-                            Err((index, client_addr))
-                        }}
-                    },
+                Ok(response) => match response.get_response() {
+                    Ok(response) => Ok((response.get_term(), response.get_success())),
+                    Err(err) => {
+                        println!("error from send_heartbeat getting the response: {:?}", err);
+                        Err((index, client_addr))
+                    }
+                },
                 Err(err) => {
                     println!("error from send_heartbeat getting the response: {:?}", err);
                     Err((index, client_addr))
@@ -155,7 +154,6 @@ impl Client {
                     data.set_prev_log_term(last_term);
                     data.set_leader_commit(commit_index);
                     data.init_entries(0);
-
 
                     tasks.spawn_local(Self::send_heartbeat(request, *addr, index));
                 }
