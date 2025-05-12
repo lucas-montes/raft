@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raft Cluster Visualization</title>
+    <style>
+        /* Basic CSS for layout and styling */
+        body { font-family: Arial, sans-serif; margin: 0; padding: 10px; }
+        #header { background: #f0f0f0; padding: 10px; text-align: center; }
+        #main { display: flex; gap: 20px; margin-top: 10px; }
+        #nodes { flex: 2; border: 1px solid #ccc; height: 400px; position: relative; }
+        #logs { flex: 1; border: 1px solid #ccc; padding: 10px; overflow-y: auto; }
+        #controls { width: 200px; border: 1px solid #ccc; padding: 10px; }
+        #messages { margin-top: 10px; border: 1px solid #ccc; height: 100px; overflow-y: auto; }
+        .node { position: absolute; width: 50px; height: 50px; border-radius: 50%; text-align: center; line-height: 50px; }
+        .leader { background: green; color: white; }
+        .follower { background: blue; color: white; }
+        .candidate { background: orange; color: white; }
+        .log-entry { margin: 5px 0; padding: 5px; border: 1px solid #999; }
+        .committed { background: #d0d0d0; }
+    </style>
+</head>
+<body>
+    <!-- Header with cluster status -->
+    <div id="header">
+        <h1>Raft Cluster Visualization</h1>
+        <p id="status">Leader: None | Quorum: 0</p>
+    </div>
+
+    <!-- Main content area -->
+    <div id="main">
+        <!-- Node visualization area -->
+        <div id="nodes">
+            <!-- Nodes will be added as <div> elements dynamically -->
+            <canvas id="message-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></canvas>
+        </div>
+
+        <!-- Log display area -->
+        <div id="logs">
+            <!-- Logs will be added as <div> elements per node -->
+        </div>
+
+        <!-- Control panel for node management -->
+        <div id="controls">
+            <h3>Add Node</h3>
+            <form id="add-node-form">
+                <label>Addr: <input value="127.0.0.1" type="text" id="node-addr" required></label><br>
+                <label>Port: <input type="text" id="node-port" placeholder="4003" required></label><br>
+                <button type="submit">Add Node</button>
+            </form>
+            <h3>Remove Node</h3>
+            <select id="remove-node-select">
+                <option value="">Select node</option>
+                <!-- Options populated dynamically -->
+            </select>
+            <button id="remove-node-btn">Remove Node</button>
+        </div>
+    </div>
+
+    <!-- Message log area -->
+    <div id="messages">
+        <!-- Message events will be appended as <p> elements -->
+    </div>
+    <script src='script.js'></script>
+</body>
+</html>
