@@ -111,11 +111,17 @@ impl Client {
         index: usize,
     ) -> Result<(u64, bool), (usize, SocketAddr)> {
         let reply = request.send().promise.await;
-        println!("sending heartbeat");
 
         match reply {
             Ok(r) => match r.get() {
-                Ok(response) => Ok((response.get_term(), response.get_success())),
+                Ok(response) => {
+                    match response.get_response(){
+                        Ok(response) => Ok((response.get_term(), response.get_success())),
+                        Err(err) => {
+                            println!("error from send_heartbeat getting the response: {:?}", err);
+                            Err((index, client_addr))
+                        }}
+                    },
                 Err(err) => {
                     println!("error from send_heartbeat getting the response: {:?}", err);
                     Err((index, client_addr))
@@ -136,16 +142,20 @@ impl Client {
         let commit_index = self.node.commit_index();
         let (last_term, last_index) = self.node.last_log_info();
 
+        tokio::time::sleep(Duration::from_secs_f64(self.node.heartbeat_latency())).await;
+        println!("sending heartbeats");
         for (index, peer) in self.peers.iter().enumerate() {
             match peer {
                 Peer::Up { client, addr } => {
                     let mut request = client.append_entries_request();
-                    request.get().set_term(current_term);
-                    request.get().set_leader_id(&node_addr);
-                    request.get().set_prev_log_index(last_index);
-                    request.get().set_prev_log_term(last_term);
-                    request.get().set_leader_commit(commit_index);
-                    request.get().init_entries(0);
+                    let mut data = request.get().init_request();
+                    data.set_term(current_term);
+                    data.set_leader_id(&node_addr);
+                    data.set_prev_log_index(last_index);
+                    data.set_prev_log_term(last_term);
+                    data.set_leader_commit(commit_index);
+                    data.init_entries(0);
+
 
                     tasks.spawn_local(Self::send_heartbeat(request, *addr, index));
                 }
@@ -211,6 +221,7 @@ impl Client {
         let node_addr = self.node.addr().to_string();
         let (last_term, last_index) = self.node.last_log_info();
 
+        tokio::time::sleep(Duration::from_secs_f64(self.node.heartbeat_latency())).await;
         //TODO: probably should be better to use a select and hook the server to listen for the heartbeat
         // https://docs.rs/tokio/latest/tokio/task/struct.JoinSet.html#examples
         for (index, peer) in self.peers.iter().enumerate() {

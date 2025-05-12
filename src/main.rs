@@ -3,6 +3,7 @@ use std::{
     time::Duration,
 };
 
+use clap::Parser;
 use client::Client;
 use concensus::Node;
 use rand::random_range;
@@ -11,28 +12,40 @@ use server::Server;
 pub mod raft_capnp {
     include!(concat!(env!("OUT_DIR"), "/raft_capnp.rs"));
 }
+
+
 mod client;
 mod concensus;
 mod server;
 
+
 fn get_election_timeout() -> Duration {
-    let election_timeout = random_range(1..3);
-    Duration::from_secs(election_timeout)
+    let election_timeout = random_range(3.0..5.0);
+    Duration::from_secs_f64(election_timeout)
+}
+
+#[derive(Debug, Parser)]
+pub struct Cli {
+    #[arg(short, long)]
+    addr: SocketAddr,
+    #[arg(short, long, num_args = 1..)]
+    nodes: Vec<SocketAddr>,
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let args: Vec<SocketAddr> = ::std::env::args()
-        .skip(1)
-        .flat_map(|f| f.to_socket_addrs().expect("wrong addresse"))
-        .collect();
+    let cli = Cli::parse();
 
-    let addr = args[0];
-    let nodes = args[1..].to_vec();
+    let nodes: Vec<SocketAddr> = cli
+        .nodes
+        .into_iter()
+        .filter(|p| !p.port().eq(&cli.addr.port()))
+        .collect();
 
     tokio::task::LocalSet::new()
         .run_until(async move {
-            let mut service = Node::new(addr);
+            let latency = random_range(1.0..2.9);
+            let mut service = Node::new(cli.addr, latency);
             let server = Server::new(service.clone());
 
             let server_task = tokio::task::spawn_local(server.run());

@@ -1,10 +1,10 @@
 use std::{net::SocketAddr, str::FromStr};
 
-use capnp::capability::Promise;
+use capnp::{capability::Promise, traits::IntoInternalListReader};
 use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
 
-use crate::{concensus::Node, raft_capnp::raft};
+use crate::{concensus::{LogEntry, Node}, raft_capnp::raft};
 
 type Err = Box<dyn std::error::Error>;
 
@@ -47,17 +47,38 @@ impl raft::Server for Server {
         params: raft::AppendEntriesParams,
         mut results: raft::AppendEntriesResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
-        let request = pry!(params.get());
-        let t = request.get_term();
+        let request = pry!(pry!(params.get()).get_request());
+
         let entries = pry!(request.get_entries());
         if entries.is_empty() {
             //NOTE: just a heartbeat
             self.node.update_heartbeat()
         } else {
-            //NOTE: actual entry to save
-            println!("from apprend_entries: current term: {t}");
-            results.get().set_success(false);
-            results.get().set_term(t + 1);
+//NOTE: actual entry to save, we should aovoid this list
+            let mut new_entries: Vec<LogEntry> = Vec::with_capacity(entries.len() as usize);
+            for e in entries {
+                new_entries.push(LogEntry::new(
+                     e.get_index(),
+                     e.get_term(),
+                     pry!(e.get_command()).to_string().expect("error getting command as string"),
+                ));
+            }
+            let leader_id = pry!(pry!(request.get_leader_id()).to_str());
+
+            let resp = self.node
+                .handle_append_entries(
+                    request.get_term(),
+                    leader_id,
+                    request.get_prev_log_index() as usize,
+                    request.get_prev_log_term(),
+                    request.get_leader_commit(),
+                    new_entries,
+                )
+                ;
+
+let mut response = pry!(results.get().get_response());
+response.set_success(resp.success());
+response.set_term(resp.term());
         }
         Promise::ok(())
     }
@@ -70,24 +91,16 @@ impl raft::Server for Server {
         let request = pry!(params.get());
         println!("the server received the request_vote {request:?}");
         let candidate_id = pry!(pry!(request.get_candidate_id()).to_str());
+        let last_log_index = request.get_last_log_index();
+        let last_log_term = request.get_last_log_term();
+        let term = request.get_term();
 
-        let current_term = self.node.current_term();
-        let term_is_uptodate = request.get_term() > current_term;
+let resp = self.node.handle_request_vote(term, candidate_id, last_log_index, last_log_term);
 
-        //NOTE: use something better for the id of the server
-        let condidate_id_matches = self.node.voted_for().is_none_or(|addr| {
-            addr.eq(&SocketAddr::from_str(candidate_id)
-                .expect("why candidate_id isnt a correct socketaddrs?"))
-        });
 
-        let (last_term, last_index) = self.node.last_log_info();
-        let logs_uptodate =
-            request.get_last_log_term() >= last_term && request.get_last_log_index() >= last_index;
 
-        let vote_granted = term_is_uptodate && condidate_id_matches && logs_uptodate;
-
-        results.get().set_vote_granted(vote_granted);
-        results.get().set_term(current_term);
+        results.get().set_vote_granted(resp.vote_granted());
+        results.get().set_term(resp.term());
         Promise::ok(())
     }
 }
