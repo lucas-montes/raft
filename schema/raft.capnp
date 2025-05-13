@@ -4,7 +4,8 @@ interface Raft {
 
   appendEntries @0 (request: AppendEntriesRequest) -> (response: AppendEntriesResponse);
 
-  requestVote @1 (term :UInt64, candidateId :Text, lastLogIndex :UInt64, lastLogTerm :UInt64) -> (voteGranted :Bool, term :UInt64);
+  requestVote @1 (term :UInt64, candidateId :Text, lastLogIndex :UInt64, lastLogTerm :UInt64) -> (response: RequestVoteResponse);
+
 }
 
 
@@ -20,6 +21,11 @@ struct AppendEntriesRequest {
 struct AppendEntriesResponse {
   term @0 :UInt64;
   success @1 :Bool;
+}
+
+struct RequestVoteResponse {
+  term @0 :UInt64;
+  voteGranted @1 :Bool;
 }
 
 struct LogEntry {

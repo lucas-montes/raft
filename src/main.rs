@@ -16,6 +16,7 @@ pub mod raft_capnp {
 mod client;
 mod concensus;
 mod server;
+mod dto;
 
 fn get_election_timeout() -> Duration {
     let election_timeout = random_range(3.0..5.0);
@@ -56,15 +57,12 @@ async fn main() {
             let client_task = tokio::task::spawn_local(client.run());
             let election_task = tokio::task::spawn_local(async move {
                 let mut election_timeout = get_election_timeout();
-                let mut counter = 0;
+
                 println!("election loop, {:?}", election_timeout);
                 loop {
                     tokio::time::sleep(election_timeout).await;
                     service.check_election(election_timeout);
-                    counter += 1;
-                    if counter % 3 == 0 {
-                        election_timeout = get_election_timeout();
-                    }
+                    election_timeout = get_election_timeout();
                 }
             });
 

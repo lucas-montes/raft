@@ -43,6 +43,7 @@ impl Server {
 }
 
 impl raft::Server for Server {
+    /// The node (a follower or candidate) receives a request from the leader to update its log
     fn append_entries(
         &mut self,
         params: raft::AppendEntriesParams,
@@ -78,6 +79,7 @@ impl raft::Server for Server {
         Promise::ok(())
     }
 
+    /// The node (a follower or candidate) receives a request from an other candidate to vote for it
     fn request_vote(
         &mut self,
         params: raft::RequestVoteParams,
@@ -94,8 +96,10 @@ impl raft::Server for Server {
             .node
             .handle_request_vote(term, candidate_id, last_log_index, last_log_term);
 
-        results.get().set_vote_granted(resp.vote_granted());
-        results.get().set_term(resp.term());
+            let mut response = pry!(results.get().get_response());
+
+            response.set_vote_granted(resp.vote_granted());
+        response.set_term(resp.term());
         Promise::ok(())
     }
 }

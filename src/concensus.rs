@@ -3,11 +3,15 @@ use std::{
     cmp::Ordering,
     fmt::Debug,
     net::SocketAddr,
-    ops::{Deref, DerefMut},
+    ops::{Deref},
     rc::Rc,
     str::FromStr,
     time::{Duration, Instant},
 };
+
+use rand::random_range;
+
+use crate::dto::{AppendEntriesResponse, RequestVoteResponse};
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub enum Role {
@@ -20,59 +24,6 @@ pub enum Role {
     Follower,
 }
 
-pub struct AppendEntriesResponse {
-    term: u64,
-    success: bool,
-}
-
-impl AppendEntriesResponse {
-    fn successful(term: u64) -> Self {
-        Self {
-            term,
-            success: true,
-        }
-    }
-    fn failed(term: u64) -> Self {
-        Self {
-            term,
-            success: false,
-        }
-    }
-
-    pub fn term(&self) -> u64 {
-        self.term
-    }
-    pub fn success(&self) -> bool {
-        self.success
-    }
-}
-
-pub struct RequestVoteResponse {
-    term: u64,
-    vote_granted: bool,
-}
-
-impl RequestVoteResponse {
-    fn granted(term: u64) -> Self {
-        Self {
-            term,
-            vote_granted: true,
-        }
-    }
-    fn not_granted(term: u64) -> Self {
-        Self {
-            term,
-            vote_granted: false,
-        }
-    }
-
-    pub fn term(&self) -> u64 {
-        self.term
-    }
-    pub fn vote_granted(&self) -> bool {
-        self.vote_granted
-    }
-}
 
 #[derive(Debug, Eq)]
 pub struct LogEntry {
@@ -156,10 +107,6 @@ impl Node {
         self.0.borrow().commit_index
     }
 
-    pub fn voted_for(&self) -> Option<SocketAddr> {
-        self.0.borrow().voted_for
-    }
-
     pub async fn role(&self) -> Role {
         self.0.borrow().role
     }
@@ -181,6 +128,14 @@ impl Node {
 
     pub fn make_leader(&mut self) {
         self.0.borrow_mut().become_leader()
+    }
+
+    pub fn make_candidate(&mut self) {
+        self.0.borrow_mut().become_candidate()
+    }
+
+    pub fn make_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
+        self.0.borrow_mut().become_follower(leader_id, new_term);
     }
 }
 
@@ -207,10 +162,10 @@ impl LogEntries {
         }
     }
 
-    fn new_entry(&mut self, term: u64, command: String) {
-        let idx = self.last().map(|e| e.index + 1).unwrap_or_default();
-        self.0.push(LogEntry::new(idx, term, command))
-    }
+    // fn new_entry(&mut self, term: u64, command: String) {
+    //     let idx = self.last().map(|e| e.index + 1).unwrap_or_default();
+    //     self.0.push(LogEntry::new(idx, term, command))
+    // }
 
     fn previous_log_entry_is_up_to_date(&self, prev_log_index: usize, prev_log_term: u64) -> bool {
         if prev_log_index + self.len() == 0 {
@@ -276,11 +231,6 @@ impl Debug for State {
     }
 }
 
-pub enum AppendEntriesError {
-    OutOfDateTerm(u64),
-    MissingLogEntries,
-}
-
 impl State {
     fn new(addr: SocketAddr, latency: f64) -> Self {
         let mut state = Self::default();
@@ -310,9 +260,12 @@ impl State {
             return AppendEntriesResponse::failed(self.current_term);
         }
 
-        self.become_follower(Some(
-            SocketAddr::from_str(leader_id).expect("why leader_id isnt a correct socketaddrs?"),
-        ), term);
+        self.become_follower(
+            Some(
+                SocketAddr::from_str(leader_id).expect("why leader_id isnt a correct socketaddrs?"),
+            ),
+            term,
+        );
 
         let current_entries = &mut self.log_entries;
 
@@ -323,7 +276,6 @@ impl State {
 
         //3 and 4
         current_entries.merge(entries);
-
 
         //5
         if leader_commit > self.commit_index {
@@ -340,6 +292,8 @@ impl State {
         last_log_index: u64,
         last_log_term: u64,
     ) -> RequestVoteResponse {
+        self.update_heartbeat();
+
         if term < self.current_term {
             return RequestVoteResponse::not_granted(self.current_term);
         }
@@ -357,7 +311,8 @@ impl State {
         let (last_term, last_index) = self.last_log_info();
 
         //NOTE: in the paper we find it has "at least up to date" and in a presentation we find this formula
-        let logs_uptodate = last_log_term > last_term || (last_log_index >= last_index && last_log_term == last_term);
+        let logs_uptodate = last_log_term > last_term
+            || (last_log_index >= last_index && last_log_term == last_term);
 
         //TODO: avoid match statement
         match condidate_id_matches && logs_uptodate {
@@ -386,8 +341,8 @@ impl State {
     fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
         self.role = Role::Follower;
         self.current_term = new_term;
-            self.voted_for = None;
-            self.leader = leader_id;
+        self.voted_for = None;
+        self.leader = leader_id;
     }
 
     fn become_candidate(&mut self) {
@@ -395,6 +350,8 @@ impl State {
         self.role = Role::Candidate;
         self.current_term += 1;
         self.voted_for = Some(self.addr);
+        self.heartbeat_latency = random_range(1.0..2.9);
+        self.last_heartbeat = Some(Instant::now());
     }
 
     fn become_leader(&mut self) {
@@ -613,30 +570,30 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_new_log_entry() {
-        let mut entries = LogEntries::default();
-        entries.new_entry(1, "command1".to_string());
+    // #[test]
+    // fn test_new_log_entry() {
+    //     let mut entries = LogEntries::default();
+    //     entries.new_entry(1, "command1".to_string());
 
-        assert_eq!(entries[0].index, 0);
-        assert_eq!(entries[0].term, 1);
-        assert_eq!(entries[0].command, "command1");
-    }
+    //     assert_eq!(entries[0].index, 0);
+    //     assert_eq!(entries[0].term, 1);
+    //     assert_eq!(entries[0].command, "command1");
+    // }
 
-    #[test]
-    fn test_new_log_entry_new_index() {
-        let mut entries = LogEntries::default();
-        entries.new_entry(1, "command1".to_string());
-        entries.new_entry(1, "command2".to_string());
+    // #[test]
+    // fn test_new_log_entry_new_index() {
+    //     let mut entries = LogEntries::default();
+    //     entries.new_entry(1, "command1".to_string());
+    //     entries.new_entry(1, "command2".to_string());
 
-        assert_eq!(entries[0].index, 0);
-        assert_eq!(entries[0].term, 1);
-        assert_eq!(entries[0].command, "command1");
+    //     assert_eq!(entries[0].index, 0);
+    //     assert_eq!(entries[0].term, 1);
+    //     assert_eq!(entries[0].command, "command1");
 
-        assert_eq!(entries[1].index, 1);
-        assert_eq!(entries[1].term, 1);
-        assert_eq!(entries[1].command, "command2");
-    }
+    //     assert_eq!(entries[1].index, 1);
+    //     assert_eq!(entries[1].term, 1);
+    //     assert_eq!(entries[1].command, "command2");
+    // }
 
     #[test]
     fn test_previous_log_entry_is_up_to_date_correct() {
@@ -784,7 +741,10 @@ mod tests {
         assert_eq!(response.vote_granted(), true);
         assert_eq!(response.term(), 2);
         assert_eq!(service.current_term, 2);
-        assert_eq!(service.voted_for, Some(SocketAddr::from_str("127.0.0.1:4001").unwrap()));
+        assert_eq!(
+            service.voted_for,
+            Some(SocketAddr::from_str("127.0.0.1:4001").unwrap())
+        );
         assert_eq!(service.role, Role::Follower);
         assert_eq!(service.leader, None);
     }
@@ -799,7 +759,10 @@ mod tests {
         assert_eq!(response.vote_granted(), true);
         assert_eq!(response.term(), 2);
         assert_eq!(service.current_term, 2);
-        assert_eq!(service.voted_for, Some(SocketAddr::from_str("127.0.0.1:4001").unwrap()));
+        assert_eq!(
+            service.voted_for,
+            Some(SocketAddr::from_str("127.0.0.1:4001").unwrap())
+        );
         assert_eq!(service.role, Role::Follower);
         assert_eq!(service.leader, None);
     }
@@ -816,14 +779,20 @@ mod tests {
         assert_eq!(response.vote_granted(), false);
         assert_eq!(response.term(), 2);
         assert_eq!(service.current_term, 2);
-        assert_eq!(service.voted_for, Some(SocketAddr::from_str("127.0.0.1:4001").unwrap()));
+        assert_eq!(
+            service.voted_for,
+            Some(SocketAddr::from_str("127.0.0.1:4001").unwrap())
+        );
         assert_eq!(service.role, Role::Follower);
     }
 
     #[test]
     fn test_handle_request_vote_logs_not_up_to_date() {
         let mut service = State::default();
-        service.log_entries = LogEntries(vec![LogEntry::new(0, 1, "command1".to_string()), LogEntry::new(1, 2, "command1".to_string())]);
+        service.log_entries = LogEntries(vec![
+            LogEntry::new(0, 1, "command1".to_string()),
+            LogEntry::new(1, 2, "command1".to_string()),
+        ]);
 
         let response = service.handle_request_vote(2, "127.0.0.1:4001", 1, 1);
 
