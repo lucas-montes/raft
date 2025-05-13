@@ -1,7 +1,4 @@
-use std::{
-    net::{SocketAddr, ToSocketAddrs},
-    time::Duration,
-};
+use std::{net::SocketAddr, time::Duration};
 
 use clap::Parser;
 use client::Client;
@@ -15,8 +12,8 @@ pub mod raft_capnp {
 
 mod client;
 mod concensus;
-mod server;
 mod dto;
+mod server;
 
 fn get_election_timeout() -> Duration {
     let election_timeout = random_range(3.0..5.0);

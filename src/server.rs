@@ -96,9 +96,9 @@ impl raft::Server for Server {
             .node
             .handle_request_vote(term, candidate_id, last_log_index, last_log_term);
 
-            let mut response = pry!(results.get().get_response());
+        let mut response = pry!(results.get().get_response());
 
-            response.set_vote_granted(resp.vote_granted());
+        response.set_vote_granted(resp.vote_granted());
         response.set_term(resp.term());
         Promise::ok(())
     }

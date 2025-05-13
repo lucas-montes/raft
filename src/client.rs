@@ -1,11 +1,13 @@
-use capnp::capability::Promise;
-use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
+// use capnp::capability::Promise;
+use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
-use std::{f32::consts::E, fmt::Debug, net::SocketAddr, time::Duration};
-use tokio::{task::JoinSet, time::sleep};
+use std::{fmt::Debug, net::SocketAddr, time::Duration};
+use tokio::task::JoinSet;
 
 use crate::{
-    concensus::{Node, Role}, dto::{AppendEntriesResponse, RequestVoteResponse}, raft_capnp::raft
+    concensus::{Node, Role},
+    dto::{AppendEntriesResponse, RequestVoteResponse},
+    raft_capnp::raft,
 };
 
 type Err = Box<dyn std::error::Error>;
@@ -27,12 +29,12 @@ impl Peer {
         Self { addr, client }
     }
 
-    async fn reconnect(&mut self){
+    async fn reconnect(&mut self) {
         let client = Self::connect(&self.addr).await;
         self.client = client;
     }
 
-    async fn connect(addr: &SocketAddr)->raft::Client{
+    async fn connect(addr: &SocketAddr) -> raft::Client {
         let mut counter = 0;
         loop {
             match create_client(addr).await {
@@ -49,13 +51,10 @@ impl Peer {
     }
 }
 
-
 struct RequestError {
     index: usize,
-    addr: SocketAddr,
     error: capnp::Error,
 }
-
 
 async fn create_client(addr: &SocketAddr) -> Result<raft::Client, Err> {
     let stream = tokio::net::TcpStream::connect(addr).await?;
@@ -82,7 +81,6 @@ pub struct Client {
 
 impl Client {
     pub async fn run(mut self) -> Result<(), Err> {
-        println!("client running");
         loop {
             match &self.node.role().await {
                 Role::Leader { .. } => self.leader_stage().await,
@@ -102,7 +100,6 @@ impl Client {
 
 impl Client {
     pub async fn add_peer(&mut self, addr: SocketAddr) {
-        println!("adding peer {addr:?}");
         self.peers.push(Peer::new(addr).await);
     }
 
@@ -111,47 +108,42 @@ impl Client {
             raft::append_entries_params::Owned,
             raft::append_entries_results::Owned,
         >,
-        client_addr: SocketAddr,
         index: usize,
     ) -> Result<AppendEntriesResponse, RequestError> {
-
         let reply = request.send().promise.await;
 
-        let response = match reply{
+        let response = match reply {
             Ok(r) => r,
             Err(err) => {
-                println!("error from evaluating the reply send_append_entries: {:?}", err);
-                return Err(RequestError {
-                    index,
-                    addr: client_addr,
-                    error: err,
-                });
+                println!(
+                    "error from evaluating the reply send_append_entries: {:?}",
+                    err
+                );
+                return Err(RequestError { index, error: err });
             }
         };
 
-        let response_value = match response.get(){
+        let response_value = match response.get() {
             Ok(r) => r.get_response(),
             Err(err) => {
-                println!("error from send_append_entries getting the response: {:?}", err);
-                return Err(RequestError {
-                    index,
-                    addr: client_addr,
-                    error: err,
-                });
+                println!(
+                    "error from send_append_entries getting the response: {:?}",
+                    err
+                );
+                return Err(RequestError { index, error: err });
             }
         };
 
-        return match response_value{
-            Ok(r) =>Ok( r.into()),
+        return match response_value {
+            Ok(r) => Ok(r.into()),
             Err(err) => {
-                println!("error from send_append_entries getting the response: {:?}", err);
-                return Err(RequestError {
-                    index,
-                    addr: client_addr,
-                    error: err,
-                });
+                println!(
+                    "error from send_append_entries getting the response: {:?}",
+                    err
+                );
+                return Err(RequestError { index, error: err });
             }
-        }
+        };
     }
 
     async fn leader_stage(&mut self) {
@@ -165,7 +157,6 @@ impl Client {
         println!("sending heartbeats");
         for (index, peer) in self.peers.iter().enumerate() {
             let client = &peer.client;
-            let addr = &peer.addr;
 
             let mut request = client.append_entries_request();
             let mut data = request.get().init_request();
@@ -176,31 +167,28 @@ impl Client {
             data.set_leader_commit(commit_index);
             data.init_entries(0);
 
-            tasks.spawn_local(Self::send_append_entries(request, *addr, index));
+            tasks.spawn_local(Self::send_append_entries(request, index));
         }
 
         while let Some(res) = tasks.join_next().await {
-           match res {
-            Ok(response) => {
-                match response {
+            match res {
+                Ok(response) => match response {
                     Ok(response) => {
                         if response.term() > self.node.current_term() {
-                            self.node.make_follower(Some(self.node.addr()), response.term());
+                            self.node
+                                .make_follower(Some(self.node.addr()), response.term());
                             println!("im a follower now so i do not send more hearbeats");
                             break;
                         }
                     }
                     Err(error) => {
-                        let peer = &mut self.peers[error.index];
-                    peer.reconnect().await;
-                        println!("error in leader_stage:, reconnecting peer {:?}",error.addr);
+                        self.peers[error.index].reconnect().await;
                     }
+                },
+                Err(err) => {
+                    println!("error in append_entries: {:?}", err);
                 }
-            }
-            Err(err) => {
-                println!("error in append_entries: {:?}", err);
-            }
-           };
+            };
         }
     }
 
@@ -209,65 +197,54 @@ impl Client {
     }
 
     async fn send_vote_request(
-        mut request: capnp::capability::Request<
+        request: capnp::capability::Request<
             raft::request_vote_params::Owned,
             raft::request_vote_results::Owned,
         >,
-        current_term: u64,
-        addr: String,
-        client_addr: SocketAddr,
-        last_term: u64,
-        last_index: u64,
+
         index: usize,
     ) -> Result<RequestVoteResponse, RequestError> {
-        request.get().set_term(current_term);
-        request.get().set_candidate_id(addr);
-        request.get().set_last_log_index(last_index);
-        request.get().set_last_log_term(last_term);
         let reply = request.send().promise.await;
         println!("sending vote");
 
-        let response = match reply{
+        let response = match reply {
             Ok(r) => r,
             Err(err) => {
-                println!("error from evaluating the reply send_vote_request: {:?}", err);
-                return Err(RequestError {
-                    index,
-                    addr: client_addr,
-                    error: err,
-                });
+                println!(
+                    "error from evaluating the reply send_vote_request: {:?}",
+                    err
+                );
+                return Err(RequestError { index, error: err });
             }
         };
 
-        let response_value = match response.get(){
+        let response_value = match response.get() {
             Ok(r) => r.get_response(),
             Err(err) => {
-                println!("error from send_vote_request getting the response: {:?}", err);
-                return Err(RequestError {
-                    index,
-                    addr: client_addr,
-                    error: err,
-                });
+                println!(
+                    "error from send_vote_request getting the response: {:?}",
+                    err
+                );
+                return Err(RequestError { index, error: err });
             }
         };
 
-        return match response_value{
-            Ok(r) =>Ok( r.into()),
+        return match response_value {
+            Ok(r) => Ok(r.into()),
             Err(err) => {
-                println!("error from send_vote_request getting the response: {:?}", err);
-                return Err(RequestError {
-                    index,
-                    addr: client_addr,
-                    error: err,
-                });
+                println!(
+                    "error from send_vote_request getting the response: {:?}",
+                    err
+                );
+                return Err(RequestError { index, error: err });
             }
-        }
+        };
     }
 
     async fn candidate_stage(&mut self) {
         let mut tasks = JoinSet::new();
         let current_term = self.node.current_term();
-        let node_addr = self.node.addr().to_string();
+        let addr = self.node.addr().to_string();
         let (last_term, last_index) = self.node.last_log_info();
 
         tokio::time::sleep(Duration::from_secs_f64(self.node.heartbeat_latency())).await;
@@ -275,37 +252,30 @@ impl Client {
         // https://docs.rs/tokio/latest/tokio/task/struct.JoinSet.html#examples
         for (index, peer) in self.peers.iter().enumerate() {
             let client = &peer.client;
-            let addr = &peer.addr;
 
-            let request = client.request_vote_request();
+            let mut request = client.request_vote_request();
+            request.get().set_term(current_term);
+            request.get().set_candidate_id(&addr);
+            request.get().set_last_log_index(last_index);
+            request.get().set_last_log_term(last_term);
 
-            tasks.spawn_local(Self::send_vote_request(
-                request,
-                current_term,
-                node_addr.clone(),
-                *addr,
-                last_term,
-                last_index,
-                index,
-            ));
+            tasks.spawn_local(Self::send_vote_request(request, index));
         }
         //NOTE: we start with one vote because we vote for ourself
         let mut votes = 1;
         while let Some(res) = tasks.join_next().await {
-
             match res.expect("why joinhandle failed?") {
-                Ok(r)=>{votes += r.vote_granted() as u64;},
+                Ok(r) => {
+                    votes += r.vote_granted() as u64;
+                }
                 Err(error) => {
-                    let peer = &mut self.peers[error.index];
-                    peer.reconnect().await;
-                    println!("error in request_vote:, reconnecting peer {:?}", error.addr);
+                    self.peers[error.index].reconnect().await;
                 }
             }
-
         }
 
         //NOTE: we add one to the number of nodes to count ourself
-        let num_nodes = self.peers.len() + 1 ;
+        let num_nodes = self.peers.len() + 1;
         let has_majority = votes > num_nodes.div_euclid(2) as u64;
         if has_majority || num_nodes.eq(&1) {
             self.node.make_leader()

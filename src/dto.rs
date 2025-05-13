@@ -1,7 +1,5 @@
 use crate::raft_capnp;
 
-
-
 pub struct RequestVoteResponse {
     term: u64,
     vote_granted: bool,
@@ -29,7 +27,7 @@ impl RequestVoteResponse {
     }
 }
 
-impl<'a> From <raft_capnp::request_vote_response::Reader<'a>> for RequestVoteResponse {
+impl<'a> From<raft_capnp::request_vote_response::Reader<'a>> for RequestVoteResponse {
     fn from(resp: raft_capnp::request_vote_response::Reader<'a>) -> Self {
         RequestVoteResponse {
             term: resp.get_term(),
@@ -37,9 +35,6 @@ impl<'a> From <raft_capnp::request_vote_response::Reader<'a>> for RequestVoteRes
         }
     }
 }
-
-
-
 
 pub struct AppendEntriesResponse {
     term: u64,
@@ -68,8 +63,7 @@ impl AppendEntriesResponse {
     }
 }
 
-
-impl<'a> From <raft_capnp::append_entries_response::Reader<'a>> for AppendEntriesResponse {
+impl<'a> From<raft_capnp::append_entries_response::Reader<'a>> for AppendEntriesResponse {
     fn from(resp: raft_capnp::append_entries_response::Reader<'a>) -> Self {
         AppendEntriesResponse {
             term: resp.get_term(),

@@ -3,7 +3,7 @@ use std::{
     cmp::Ordering,
     fmt::Debug,
     net::SocketAddr,
-    ops::{Deref},
+    ops::Deref,
     rc::Rc,
     str::FromStr,
     time::{Duration, Instant},
@@ -23,7 +23,6 @@ pub enum Role {
     #[default]
     Follower,
 }
-
 
 #[derive(Debug, Eq)]
 pub struct LogEntry {
@@ -188,12 +187,6 @@ impl Deref for LogEntries {
         &self.0
     }
 }
-
-// impl DerefMut for LogEntries {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         &mut self.0
-//     }
-// }
 
 struct State {
     heartbeat_latency: f64,
