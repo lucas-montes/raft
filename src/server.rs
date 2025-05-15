@@ -3,13 +3,13 @@ use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
 
 use crate::{
-    concensus::{LogEntry, Node},
-    raft_capnp::raft,
+    concensus::{AppendEntriesError, LogEntry, Node, Role},
+    raft_capnp::{command, raft},
 };
 
 type Err = Box<dyn std::error::Error>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Server {
     node: Node,
 }
@@ -39,6 +39,25 @@ impl Server {
 
     pub fn new(node: Node) -> Self {
         Self { node }
+    }
+}
+
+impl command::Server for Server {
+    fn start_transaction(&mut self,params:command::StartTransactionParams<>,mut results :command::StartTransactionResults<>) ->  capnp::capability::Promise<(), capnp::Error> {
+        if self.node.role()  == Role::Leader {
+            results.get().set_leader(capnp_rpc::new_client(self.clone()));
+
+        } else {
+            // for peer in &self.peers {
+            //     // In a real implementation, you would check which peer is the leader
+            //     // For this example, we'll just use the first peer
+            //     results.get().set_leader(peer.client.clone());
+            //     println!("leader: {:?}", peer);
+            //     break;
+            // }
+
+        }
+        Promise::ok(())
     }
 }
 
@@ -73,10 +92,36 @@ impl raft::Server for Server {
             new_entries,
         );
 
-        let mut response = pry!(results.get().get_response());
-        response.set_success(resp.success());
-        response.set_term(resp.term());
-        Promise::ok(())
+        let entries_client = pry!(request.get_handle_entries());
+
+//TODO: make it better
+        Promise::from_future(async move {
+            let mut response = results.get().get_response()?;
+
+            match resp{
+                Ok(_)=>{
+                    response.set_ok(());
+                },
+                Err(e)=>{
+                    match e {
+                        AppendEntriesError::TermMismatch(term)=>{
+                            response.set_err(term);
+                        },
+                        AppendEntriesError::LogEntriesMismatch { last_index, last_term } => {
+
+                            let mut entries_client = entries_client.get_request();
+                            entries_client.get().set_last_log_index(last_index);
+                            entries_client.get().set_last_log_term(last_term);
+                            let entries_up_to_date = entries_client.send().promise.await?;
+                            //TODO: use the response to update its log's entries
+
+                            response.set_ok(());
+                        }
+                    }
+                }
+            }
+Ok(())
+        })
     }
 
     /// The node (a follower or candidate) receives a request from an other candidate to vote for it
