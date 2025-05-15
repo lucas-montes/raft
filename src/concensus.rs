@@ -11,14 +11,12 @@ use std::{
 
 use rand::random_range;
 
-use crate::dto::{AppendEntriesResponse, RequestVoteResponse};
+use crate::{client::Peer, dto::RequestVoteResponse};
+
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub enum Role {
-    Leader {
-        next_index: u64,
-        match_index: u64,
-    },
+    Leader,
     Candidate,
     #[default]
     Follower,
@@ -63,6 +61,7 @@ impl Ord for LogEntry {
 pub struct Node(Rc<RefCell<State>>);
 
 impl Node {
+
     pub fn handle_append_entries(
         &self,
         term: u64,
@@ -71,7 +70,7 @@ impl Node {
         prev_log_term: u64,
         leader_commit: u64,
         entries: Vec<LogEntry>,
-    ) -> AppendEntriesResponse {
+    ) -> Result<(), AppendEntriesError> {
         self.0.borrow_mut().handle_append_entries(
             term,
             leader_id,
@@ -106,7 +105,7 @@ impl Node {
         self.0.borrow().commit_index
     }
 
-    pub async fn role(&self) -> Role {
+    pub fn role(&self) -> Role {
         self.0.borrow().role
     }
 
@@ -224,7 +223,13 @@ impl Debug for State {
     }
 }
 
+pub enum AppendEntriesError {
+    TermMismatch(u64),
+    LogEntriesMismatch { last_index: u64, last_term: u64 },
+}
+
 impl State {
+
     fn new(addr: SocketAddr, latency: f64) -> Self {
         let mut state = Self::default();
         state.addr = addr;
@@ -246,11 +251,11 @@ impl State {
         prev_log_term: u64,
         leader_commit: u64,
         entries: Vec<LogEntry>,
-    ) -> AppendEntriesResponse {
+    ) -> Result<(), AppendEntriesError> {
         self.update_heartbeat();
         //1
         if term < self.current_term {
-            return AppendEntriesResponse::failed(self.current_term);
+            return Err(AppendEntriesError::TermMismatch(self.current_term));
         }
 
         self.become_follower(
@@ -264,18 +269,23 @@ impl State {
 
         //2
         if !current_entries.previous_log_entry_is_up_to_date(prev_log_index, prev_log_term) {
-            return AppendEntriesResponse::failed(term);
+            //TODO: when we return this error, the leader needs to know the last index/term of the
+            //failing node so it can send the log entries to make him update
+            let (last_term, last_index) = self.last_log_info();
+            return Err(AppendEntriesError::LogEntriesMismatch { last_index, last_term });
         }
 
         //3 and 4
         current_entries.merge(entries);
 
+        let (_, last_index) = self.last_log_info();
+
         //5
         if leader_commit > self.commit_index {
-            self.commit_index = leader_commit;
+            self.commit_index = std::cmp::min(leader_commit, last_index);
         }
 
-        return AppendEntriesResponse::successful(term);
+        Ok(())
     }
 
     fn handle_request_vote(
@@ -349,11 +359,8 @@ impl State {
 
     fn become_leader(&mut self) {
         println!("im the leader now");
-        let last_log = self.log_entries.last().map(|l| l.index).unwrap_or_default();
-        self.role = Role::Leader {
-            next_index: last_log + 1,
-            match_index: last_log,
-        };
+        // let last_log = self.log_entries.last().map(|l| l.index).unwrap_or_default();
+        self.role = Role::Leader;
         self.voted_for = None;
     }
 
@@ -383,8 +390,13 @@ mod tests {
 
         let response = service.handle_append_entries(0, "127.0.0.1:4000", 0, 0, 0, vec![]);
 
-        assert_eq!(response.success(), false);
-        assert_eq!(response.term(), 1);
+        match response.unwrap_err(){
+            AppendEntriesError::TermMismatch(term) => {
+                assert_eq!(term, 1);
+            }
+            _ => panic!("Expected TermMismatch error"),
+        }
+
         assert_eq!(service.current_term, 1);
         assert_eq!(service.voted_for, None);
         assert_eq!(service.log_entries.len(), 0);
@@ -409,8 +421,12 @@ mod tests {
 
         let response = service.handle_append_entries(0, "127.0.0.1:4000", 0, 0, 0, vec![]);
 
-        assert_eq!(response.success(), false);
-        assert_eq!(response.term(), 1);
+        match response.unwrap_err(){
+            AppendEntriesError::TermMismatch(term) => {
+                assert_eq!(term, 1);
+            }
+            _ => panic!("Expected TermMismatch error"),
+        }
         assert_eq!(service.current_term, 1);
         assert_eq!(service.voted_for, remote);
         assert_eq!(service.log_entries.len(), 0);
@@ -437,8 +453,14 @@ mod tests {
 
         let response = service.handle_append_entries(1, "127.0.0.1:4003", 1, 1, 1, entries);
 
-        assert_eq!(response.success(), false);
-        assert_eq!(response.term(), 1);
+        match response.unwrap_err(){
+            AppendEntriesError::LogEntriesMismatch { last_index, last_term } => {
+                assert_eq!(last_index, 0);
+                assert_eq!(last_term, 1);
+            }
+            _ => panic!("Expected LogEntriesMismatch error"),
+        }
+
         assert_eq!(service.current_term, 1);
         assert_eq!(service.voted_for, None);
         assert_eq!(service.log_entries.len(), 1);
@@ -469,8 +491,13 @@ mod tests {
 
         let response = service.handle_append_entries(1, "127.0.0.1:4003", 1, 1, 1, entries);
 
-        assert_eq!(response.success(), false);
-        assert_eq!(response.term(), 1);
+        match response.unwrap_err(){
+            AppendEntriesError::LogEntriesMismatch { last_index, last_term } => {
+                assert_eq!(last_index, 0);
+                assert_eq!(last_term, 1);
+            }
+            _ => panic!("Expected LogEntriesMismatch error"),
+        }
         assert_eq!(service.current_term, 1);
         assert_eq!(service.voted_for, None);
         assert_eq!(service.log_entries.len(), 1);
@@ -504,8 +531,14 @@ mod tests {
 
         let response = service.handle_append_entries(2, "127.0.0.1:4003", 0, 2, 1, entries);
 
-        assert_eq!(response.success(), false);
-        assert_eq!(response.term(), 2);
+        match response.unwrap_err(){
+            AppendEntriesError::LogEntriesMismatch { last_index, last_term } => {
+                assert_eq!(last_index, 0);
+                assert_eq!(last_term, 1);
+            }
+            _ => panic!("Expected LogEntriesMismatch error"),
+        }
+
         assert_eq!(service.current_term, 2);
         assert_eq!(service.voted_for, None);
         assert_eq!(service.log_entries.len(), 1);
@@ -539,8 +572,7 @@ mod tests {
 
         let response = service.handle_append_entries(2, "127.0.0.1:4003", 0, 1, 1, entries);
 
-        assert_eq!(response.success(), true);
-        assert_eq!(response.term(), 2);
+        assert!(response.is_ok());
         assert_eq!(service.current_term, 2);
         assert_eq!(service.voted_for, None);
         assert_eq!(service.log_entries.len(), 2);

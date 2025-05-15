@@ -42,7 +42,6 @@ impl Peer {
                     break client;
                 }
                 Err(err) => {
-                    println!("error in add_follower: {:?}", err);
                     counter += 1;
                     tokio::time::sleep(Duration::from_secs(counter)).await;
                 }
@@ -82,8 +81,8 @@ pub struct Client {
 impl Client {
     pub async fn run(mut self) -> Result<(), Err> {
         loop {
-            match &self.node.role().await {
-                Role::Leader { .. } => self.leader_stage().await,
+            match &self.node.role() {
+                Role::Leader => self.leader_stage().await,
                 Role::Follower => self.follower_stage().await,
                 Role::Candidate => self.candidate_stage().await,
             }
@@ -134,8 +133,8 @@ impl Client {
             }
         };
 
-        return match response_value {
-            Ok(r) => Ok(r.into()),
+        let response = match response_value {
+            Ok(r) => r.try_into(),
             Err(err) => {
                 println!(
                     "error from send_append_entries getting the response: {:?}",
@@ -144,6 +143,16 @@ impl Client {
                 return Err(RequestError { index, error: err });
             }
         };
+
+        match response {
+            Ok(r) => Ok(r),
+            Err(err) => {
+                println!("error from send_append_entries getting the response: {:?}", err);
+                return Err(RequestError { index, error: err });
+            }
+        }
+
+
     }
 
     async fn leader_stage(&mut self) {
@@ -169,25 +178,30 @@ impl Client {
 
             tasks.spawn_local(Self::send_append_entries(request, index));
         }
+        //TODO: split in two, one to send, one to receive
 
         while let Some(res) = tasks.join_next().await {
-            match res {
-                Ok(response) => match response {
-                    Ok(response) => {
-                        if response.term() > self.node.current_term() {
-                            self.node
-                                .make_follower(Some(self.node.addr()), response.term());
-                            println!("im a follower now so i do not send more hearbeats");
-                            break;
-                        }
-                    }
-                    Err(error) => {
-                        self.peers[error.index].reconnect().await;
-                    }
-                },
+            let task_result = match res {
+                Ok(response) =>  response,
                 Err(err) => {
                     println!("error in append_entries: {:?}", err);
+                    continue;
                 }
+            };
+            let append_entries_response = match task_result {Ok(response) => {
+                response
+            },
+            Err(error) => {
+                self.peers[error.index].reconnect().await;
+                continue;
+            }};
+
+            if let AppendEntriesResponse::Err(term) = append_entries_response{
+                //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
+                self.node
+                        .make_follower(Some(self.node.addr()), term);
+                    println!("im a follower now so i do not send more hearbeats");
+                    break;
             };
         }
     }

@@ -62,6 +62,8 @@ async fn main() {
                     election_timeout = get_election_timeout();
                 }
             });
+            //TODO: reduce to two tasks. One for the server and the second would be the election/heartbeat
+
 
             match tokio::try_join!(server_task, client_task, election_task) {
                 Ok(_) => {

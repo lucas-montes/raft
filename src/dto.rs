@@ -36,38 +36,33 @@ impl<'a> From<raft_capnp::request_vote_response::Reader<'a>> for RequestVoteResp
     }
 }
 
-pub struct AppendEntriesResponse {
-    term: u64,
-    success: bool,
+pub enum AppendEntriesResponse {
+    Ok,
+    Err(u64),
 }
 
-impl AppendEntriesResponse {
-    pub fn successful(term: u64) -> Self {
-        Self {
-            term,
-            success: true,
-        }
-    }
-    pub fn failed(term: u64) -> Self {
-        Self {
-            term,
-            success: false,
-        }
-    }
 
-    pub fn term(&self) -> u64 {
-        self.term
-    }
-    pub fn success(&self) -> bool {
-        self.success
-    }
-}
+impl TryFrom<raft_capnp::append_entries_response::Reader<'_>> for AppendEntriesResponse {
+    type Error = capnp::Error;
 
-impl<'a> From<raft_capnp::append_entries_response::Reader<'a>> for AppendEntriesResponse {
-    fn from(resp: raft_capnp::append_entries_response::Reader<'a>) -> Self {
-        AppendEntriesResponse {
-            term: resp.get_term(),
-            success: resp.get_success(),
+    fn try_from(resp: raft_capnp::append_entries_response::Reader<'_>) -> Result<Self, Self::Error> {
+        match resp.which()?{
+            raft_capnp::append_entries_response::Ok(()) => {
+                Ok(AppendEntriesResponse::Ok)
+            }
+            raft_capnp::append_entries_response::Err(err) => {
+                Ok(AppendEntriesResponse::Err(err))
+            }
         }
     }
 }
+
+// impl<'a> TryFrom<raft_capnp::append_entries_response::Reader<'a>> for AppendEntriesResponse {
+//     fn try_from(resp: raft_capnp::append_entries_response::Reader<'a>) -> Self {
+//         resp.which()
+//         AppendEntriesResponse {
+//             term: resp.get_term(),
+//             success: resp.get_success(),
+//         }
+//     }
+// }
