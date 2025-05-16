@@ -1,18 +1,19 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, rc::Rc, time::Duration};
 
 use clap::Parser;
-use client::Client;
-use concensus::Node;
 use rand::random_range;
 use server::Server;
+use state::{Node, NodeId, State};
 
 pub mod raft_capnp {
     include!(concat!(env!("OUT_DIR"), "/raft_capnp.rs"));
 }
 
 mod client;
-mod concensus;
+mod consensus;
+mod storage;
 mod dto;
+mod state;
 mod server;
 
 fn get_election_timeout() -> Duration {
@@ -41,31 +42,21 @@ async fn main() {
     tokio::task::LocalSet::new()
         .run_until(async move {
             let latency = random_range(1.0..2.9);
-            let mut service = Node::new(cli.addr, latency);
-            let server = Server::new(service.clone());
+            let mut state = State::new(NodeId::new(cli.addr));
+            let (tx, rx) = tokio::sync::mpsc::channel(100);
+            let mut service = Node::new(&mut state, latency, rx);
+
+            let server = Server::new(Rc::new(state), tx);
 
             let server_task = tokio::task::spawn_local(server.run());
 
-            let mut client = Client::new(service.clone());
             for node in nodes {
-                client.add_peer(node).await;
+                service.add_peer(node).await;
             }
 
-            let client_task = tokio::task::spawn_local(client.run());
-            let election_task = tokio::task::spawn_local(async move {
-                let mut election_timeout = get_election_timeout();
+            let client_task = tokio::task::spawn_local(service.run());
 
-                println!("election loop, {:?}", election_timeout);
-                loop {
-                    tokio::time::sleep(election_timeout).await;
-                    service.check_election(election_timeout);
-                    election_timeout = get_election_timeout();
-                }
-            });
-            //TODO: reduce to two tasks. One for the server and the second would be the election/heartbeat
-
-
-            match tokio::try_join!(server_task, client_task, election_task) {
+            match tokio::try_join!(server_task, client_task) {
                 Ok(_) => {
                     println!("Server and client are running");
                 }

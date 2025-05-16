@@ -37,7 +37,7 @@ interface ResultSet {
 
 interface Raft {
   appendEntries @0 (request: AppendEntriesRequest) -> (response: AppendEntriesResponse);
-  requestVote @1 (term :UInt64, candidateId :Text, lastLogIndex :UInt64, lastLogTerm :UInt64) -> (response: RequestVoteResponse);
+  requestVote @1 (term :UInt64, candidateId :Text, lastLogIndex :UInt64, lastLogTerm :UInt64) -> (response: VoteResponse);
 
 }
 
@@ -48,7 +48,7 @@ interface Raft {
 
 struct AppendEntriesRequest {
   term @0 :UInt64;
-  leaderId @1 :Text;
+  leader @1 :Peer;
   prevLogIndex @2:UInt64;
   prevLogTerm @3 :UInt64;
   entries @4 :List(LogEntry);
@@ -63,7 +63,7 @@ union {
   }
 }
 
-struct RequestVoteResponse {
+struct VoteResponse {
   term @0 :UInt64;
   voteGranted @1 :Bool;
 }
@@ -72,4 +72,10 @@ struct LogEntry {
   index @0 :UInt64;
   term @1:UInt64;
   command @2 :Text;
+}
+
+struct Peer {
+  id @0 :Text;
+  address @1 :Text;
+  client @2 :Raft;
 }

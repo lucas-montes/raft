@@ -1,23 +1,25 @@
+use std::rc::Rc;
+
 use capnp::capability::Promise;
 use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
+use tokio::sync::{mpsc::Sender};
+
 
 use crate::{
-    concensus::{AppendEntriesError, LogEntry, Node, Role},
-    raft_capnp::{command, raft},
+    consensus::{ AppendEntriesResult, }, dto::{ ServerMsg, }, raft_capnp::{command, raft}, state::{Role, State}, storage::LogEntry
 };
-
-type Err = Box<dyn std::error::Error>;
 
 #[derive(Debug, Clone)]
 pub struct Server {
-    node: Node,
+    state: Rc<State>,
+    state_channel: Sender<ServerMsg>
 }
 
 impl Server {
-    pub async fn run(self) -> Result<(), Err> {
+    pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         println!("server start");
-        let listener = tokio::net::TcpListener::bind(&self.node.addr()).await?;
+        let listener = tokio::net::TcpListener::bind(&self.state.addr()).await?;
         let client: raft::Client = capnp_rpc::new_client(self);
         loop {
             let (stream, _) = listener.accept().await?;
@@ -37,25 +39,26 @@ impl Server {
         }
     }
 
-    pub fn new(node: Node) -> Self {
-        Self { node }
+    pub fn new(state: Rc<State>, state_channel: Sender<ServerMsg>) -> Self {
+        Self { state, state_channel }
     }
 }
 
+
+
 impl command::Server for Server {
-    fn start_transaction(&mut self,params:command::StartTransactionParams<>,mut results :command::StartTransactionResults<>) ->  capnp::capability::Promise<(), capnp::Error> {
-        if self.node.role()  == Role::Leader {
-            results.get().set_leader(capnp_rpc::new_client(self.clone()));
-
+    fn start_transaction(
+        &mut self,
+        params: command::StartTransactionParams,
+        mut results: command::StartTransactionResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        if self.state.role() == Role::Leader {
+            results
+                .get()
+                .set_leader(capnp_rpc::new_client(self.clone()));
         } else {
-            // for peer in &self.peers {
-            //     // In a real implementation, you would check which peer is the leader
-            //     // For this example, we'll just use the first peer
-            //     results.get().set_leader(peer.client.clone());
-            //     println!("leader: {:?}", peer);
-            //     break;
-            // }
-
+            // self.node.leader();
+            // results.get().set_leader(peer.client.clone());
         }
         Promise::ok(())
     }
@@ -81,47 +84,64 @@ impl raft::Server for Server {
                     .expect("error getting command as string"),
             ));
         }
-        let leader_id = pry!(pry!(request.get_leader_id()).to_str());
+        let leader = pry!(request.get_leader());
 
-        let resp = self.node.handle_append_entries(
+        let (msg, rx)= ServerMsg::request_append_entries(
             request.get_term(),
-            leader_id,
-            request.get_prev_log_index() as usize,
+            "leader".into(),
+            request.get_prev_log_index(),
             request.get_prev_log_term(),
-            request.get_leader_commit(),
             new_entries,
+            request.get_leader_commit(),
         );
 
-        let entries_client = pry!(request.get_handle_entries());
+        if let Err(err) =self.state_channel.blocking_send(msg){
+            println!("error sending the append_entries to the state {err}");
+            return Promise::err(capnp::Error::failed("error sending the append_entries to the state".into()));
+        };
 
-//TODO: make it better
-        Promise::from_future(async move {
-            let mut response = results.get().get_response()?;
+        match rx.blocking_recv(){
+            Ok(resp) => {
+                let entries_client = pry!(request.get_handle_entries());
 
-            match resp{
-                Ok(_)=>{
-                    response.set_ok(());
-                },
-                Err(e)=>{
-                    match e {
-                        AppendEntriesError::TermMismatch(term)=>{
-                            response.set_err(term);
-                        },
-                        AppendEntriesError::LogEntriesMismatch { last_index, last_term } => {
+                //TODO: make it better
+                Promise::from_future(async move {
+                    let mut response = results.get().get_response()?;
 
-                            let mut entries_client = entries_client.get_request();
-                            entries_client.get().set_last_log_index(last_index);
-                            entries_client.get().set_last_log_term(last_term);
-                            let entries_up_to_date = entries_client.send().promise.await?;
-                            //TODO: use the response to update its log's entries
-
+                    match resp {
+                        AppendEntriesResult::Ok => {
                             response.set_ok(());
                         }
+
+                        AppendEntriesResult::TermMismatch(term) => {
+                                    response.set_err(term);
+                                }
+                                AppendEntriesResult::LogEntriesMismatch {
+                                    last_index,
+                                    last_term,
+                                } => {
+                                    let mut entries_client = entries_client.get_request();
+                                    entries_client.get().set_last_log_index(last_index);
+                                    entries_client.get().set_last_log_term(last_term);
+                                    let entries_up_to_date = entries_client.send().promise.await?;
+                                    //TODO: use the response to update its log's entries
+
+                                    response.set_ok(());
+                                }
+
                     }
-                }
+                    Ok(())
+                })
+
             }
-Ok(())
-        })
+            Err(err) => {
+                println!("error receiving the append_entries response {err}");
+                Promise::err(capnp::Error::failed("error receiving the append_entries response".into()))
+            }
+        }
+
+
+
     }
 
     /// The node (a follower or candidate) receives a request from an other candidate to vote for it
@@ -132,19 +152,35 @@ Ok(())
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let request = pry!(params.get());
         println!("the server received the request_vote {request:?}");
-        let candidate_id = pry!(pry!(request.get_candidate_id()).to_str());
+        let candidate_id = pry!(pry!(request.get_candidate_id()).to_string());
         let last_log_index = request.get_last_log_index();
         let last_log_term = request.get_last_log_term();
         let term = request.get_term();
 
-        let resp = self
-            .node
-            .handle_request_vote(term, candidate_id, last_log_index, last_log_term);
+       let (msg, rx)= ServerMsg::request_vote(
+            term,
+            candidate_id,
+            last_log_index,
+            last_log_term,
+        );
 
-        let mut response = pry!(results.get().get_response());
+        if let Err(err) =self.state_channel.blocking_send(msg){
+            println!("error sending the request_vote to the state {err}");
+            return Promise::err(capnp::Error::failed("error sending the request_vote to the state".into()));
+        };
+
+        match rx.blocking_recv(){
+            Ok(resp) => {
+                let mut response = pry!(results.get().get_response());
 
         response.set_vote_granted(resp.vote_granted());
         response.set_term(resp.term());
         Promise::ok(())
+            }
+            Err(err) => {
+                println!("error receiving the request_vote response {err}");
+                Promise::err(capnp::Error::failed("error receiving the request_vote response".into()))
+            }
+        }
     }
 }

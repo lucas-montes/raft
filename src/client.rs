@@ -5,57 +5,19 @@ use std::{fmt::Debug, net::SocketAddr, time::Duration};
 use tokio::task::JoinSet;
 
 use crate::{
-    concensus::{Node, Role},
-    dto::{AppendEntriesResponse, RequestVoteResponse},
-    raft_capnp::raft,
+    consensus::Consensus, dto::{AppendEntriesResponse, VoteResponse}, raft_capnp::{self, raft}
 };
 
 type Err = Box<dyn std::error::Error>;
 
-pub struct Peer {
-    addr: SocketAddr,
-    client: raft::Client,
-}
 
-impl Debug for Peer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Peer {{ addr: {:?} }}", self.addr)
-    }
-}
-
-impl Peer {
-    async fn new(addr: SocketAddr) -> Self {
-        let client = Self::connect(&addr).await;
-        Self { addr, client }
-    }
-
-    async fn reconnect(&mut self) {
-        let client = Self::connect(&self.addr).await;
-        self.client = client;
-    }
-
-    async fn connect(addr: &SocketAddr) -> raft::Client {
-        let mut counter = 0;
-        loop {
-            match create_client(addr).await {
-                Ok(client) => {
-                    break client;
-                }
-                Err(err) => {
-                    counter += 1;
-                    tokio::time::sleep(Duration::from_secs(counter)).await;
-                }
-            }
-        }
-    }
-}
 
 struct RequestError {
     index: usize,
     error: capnp::Error,
 }
 
-async fn create_client(addr: &SocketAddr) -> Result<raft::Client, Err> {
+pub async fn create_client(addr: &SocketAddr) -> Result<raft::Client, Err> {
     let stream = tokio::net::TcpStream::connect(addr).await?;
     stream.set_nodelay(true)?;
     let (reader, writer) = tokio_util::compat::TokioAsyncReadCompatExt::compat(stream).split();
@@ -72,35 +34,7 @@ async fn create_client(addr: &SocketAddr) -> Result<raft::Client, Err> {
     Ok(client)
 }
 
-#[derive(Debug)]
-pub struct Client {
-    node: Node,
-    peers: Vec<Peer>,
-}
-
-impl Client {
-    pub async fn run(mut self) -> Result<(), Err> {
-        loop {
-            match &self.node.role() {
-                Role::Leader => self.leader_stage().await,
-                Role::Follower => self.follower_stage().await,
-                Role::Candidate => self.candidate_stage().await,
-            }
-        }
-    }
-
-    pub fn new(node: Node) -> Self {
-        Self {
-            node,
-            peers: Vec::new(),
-        }
-    }
-}
-
-impl Client {
-    pub async fn add_peer(&mut self, addr: SocketAddr) {
-        self.peers.push(Peer::new(addr).await);
-    }
+trait Client: Consensus {
 
     async fn send_append_entries(
         request: capnp::capability::Request<
@@ -147,81 +81,97 @@ impl Client {
         match response {
             Ok(r) => Ok(r),
             Err(err) => {
-                println!("error from send_append_entries getting the response: {:?}", err);
+                println!(
+                    "error from send_append_entries getting the response: {:?}",
+                    err
+                );
                 return Err(RequestError { index, error: err });
             }
         }
-
-
     }
 
-    async fn leader_stage(&mut self) {
-        let mut tasks = JoinSet::new();
-        let current_term = self.node.current_term();
-        let node_addr = self.node.addr().to_string();
-        let commit_index = self.node.commit_index();
-        let (last_term, last_index) = self.node.last_log_info();
-
-        tokio::time::sleep(Duration::from_secs_f64(self.node.heartbeat_latency())).await;
-        println!("sending heartbeats");
-        for (index, peer) in self.peers.iter().enumerate() {
-            let client = &peer.client;
-
-            let mut request = client.append_entries_request();
-            let mut data = request.get().init_request();
-            data.set_term(current_term);
-            data.set_leader_id(&node_addr);
-            data.set_prev_log_index(last_index);
-            data.set_prev_log_term(last_term);
-            data.set_leader_commit(commit_index);
-            data.init_entries(0);
-
-            tasks.spawn_local(Self::send_append_entries(request, index));
-        }
-        //TODO: split in two, one to send, one to receive
-
+    async fn manage_append_entries_tasks(&self, mut tasks: JoinSet<Result<AppendEntriesResponse, RequestError>>){
         while let Some(res) = tasks.join_next().await {
             let task_result = match res {
-                Ok(response) =>  response,
+                Ok(response) => response,
                 Err(err) => {
                     println!("error in append_entries: {:?}", err);
                     continue;
                 }
             };
-            let append_entries_response = match task_result {Ok(response) => {
-                response
-            },
-            Err(error) => {
-                self.peers[error.index].reconnect().await;
-                continue;
-            }};
+            let append_entries_response = match task_result {
+                Ok(response) => response,
+                Err(error) => {
+                    // self.peers[error.index].reconnect().await;
+                    continue;
+                }
+            };
 
-            if let AppendEntriesResponse::Err(term) = append_entries_response{
+            if let AppendEntriesResponse::Err(term) = append_entries_response {
                 //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
-                self.node
-                        .make_follower(Some(self.node.addr()), term);
-                    println!("im a follower now so i do not send more hearbeats");
-                    break;
+                // self.become_follower(self.node.addr(), term);
+                println!("im a follower now so i do not send more hearbeats");
+                break;
             };
         }
     }
 
-    async fn follower_stage(&self) {
-        tokio::time::sleep(Duration::from_millis(25)).await
+
+    async fn prepare_append_entries_tasks(&mut self)->JoinSet<Result<AppendEntriesResponse, RequestError>> {
+        let mut tasks = JoinSet::new();
+        let current_term = self.current_term();
+        // let node_addr = self.state.addr().to_string();
+        let commit_index = self.commit_index();
+        let (last_term, last_index) = self.last_log_info();
+
+        println!("sending heartbeats");
+        for (index, peer) in self.peers().iter().enumerate() {
+            let client = peer.client();
+
+            let mut request = client.append_entries_request();
+
+            let mut data = request.get().init_request();
+            // let mut leader = data.reborrow().init_leader();
+
+            // data.set_term(current_term);
+
+
+            // leader.set_id("value");
+            // leader.set_address("value");
+            // // leader.set_client(value);
+            // data.set_leader(leader.into_reader());
+
+            data.set_prev_log_index(last_index);
+            data.set_prev_log_term(last_term);
+            // data.set_leader_commit(commit_index);
+            // data.init_entries(0);
+
+            tasks.spawn_local(Self::send_append_entries(request, index));
+        }
+        //TODO: split in two, one to send, one to receive
+
+        tasks
     }
 
-    async fn send_vote_request(
-        request: capnp::capability::Request<
-            raft::request_vote_params::Owned,
-            raft::request_vote_results::Owned,
-        >,
+    async fn append_entries(&mut self) {
+        let tasks = self.prepare_append_entries_tasks().await;
+        self.manage_append_entries_tasks(tasks).await;
+    }
 
+    // async fn vote(&mut self){
+    //     let tasks = self.prepare_vote_tasks().await;
+    //     self.manage_vote_tasks(tasks).await;
+    // }
+
+
+    async fn send_vote(
+        reply: capnp::capability::Promise<capnp::capability::Response<raft::request_vote_results::Owned>, capnp::Error>,
         index: usize,
-    ) -> Result<RequestVoteResponse, RequestError> {
-        let reply = request.send().promise.await;
+    ) -> Result<VoteResponse, RequestError> {
+        // let reply = request.send().promise.await;
         println!("sending vote");
 
-        let response = match reply {
+        let response = match reply.await {
             Ok(r) => r,
             Err(err) => {
                 println!(
@@ -254,47 +204,72 @@ impl Client {
             }
         };
     }
+    async fn manage_vote_tasks(&mut self, mut tasks: JoinSet<Result<VoteResponse, RequestError>>){
+                //NOTE: we start with one vote because we vote for ourself
+                let mut votes = 1;
+                while let Some(res) = tasks.join_next().await {
+                    match res.expect("why joinhandle failed?") {
+                        Ok(r) => {
+                            votes += r.vote_granted() as u64;
+                        }
+                        Err(error) => {
+                            // self.peers[error.index].reconnect().await;
+                        }
+                    }
+                }
 
-    async fn candidate_stage(&mut self) {
-        let mut tasks = JoinSet::new();
-        let current_term = self.node.current_term();
-        let addr = self.node.addr().to_string();
-        let (last_term, last_index) = self.node.last_log_info();
+                //NOTE: we add one to the number of nodes to count ourself
+                let num_nodes = self.peers().len() + 1;
+                let has_majority = votes > num_nodes.div_euclid(2) as u64;
+                if has_majority || num_nodes.eq(&1) {
+                    self.become_leader()
+                } else {
+                    self.become_candidate()
+                }
+    }
 
-        tokio::time::sleep(Duration::from_secs_f64(self.node.heartbeat_latency())).await;
+    async fn prepare_vote_tasks(&mut self) {
+        let mut tasks= JoinSet::new();
+        let current_term = self.current_term();
+        // let addr = self.node.addr()();
+        let (last_term, last_index) = self.last_log_info();
+
         //TODO: probably should be better to use a select and hook the server to listen for the heartbeat
         // https://docs.rs/tokio/latest/tokio/task/struct.JoinSet.html#examples
-        for (index, peer) in self.peers.iter().enumerate() {
-            let client = &peer.client;
+        for (index, peer) in self.peers().iter().enumerate() {
+            let client = peer.client();
 
             let mut request = client.request_vote_request();
             request.get().set_term(current_term);
-            request.get().set_candidate_id(&addr);
+            // request.get().set_candidate_id(&addr);
             request.get().set_last_log_index(last_index);
             request.get().set_last_log_term(last_term);
+            let p = request.send().promise;
+            let t = Self::send_vote(p, index);
 
-            tasks.spawn_local(Self::send_vote_request(request, index));
+
+            tasks.spawn_local(t);
         }
-        //NOTE: we start with one vote because we vote for ourself
         let mut votes = 1;
         while let Some(res) = tasks.join_next().await {
             match res.expect("why joinhandle failed?") {
                 Ok(r) => {
-                    votes += r.vote_granted() as u64;
+                    // votes += r.vote_granted() as u64;
                 }
                 Err(error) => {
-                    self.peers[error.index].reconnect().await;
+                    // self.peers()[error.index].reconnect().await;
                 }
             }
         }
 
         //NOTE: we add one to the number of nodes to count ourself
-        let num_nodes = self.peers.len() + 1;
+        let num_nodes = self.peers().len() + 1;
         let has_majority = votes > num_nodes.div_euclid(2) as u64;
         if has_majority || num_nodes.eq(&1) {
-            self.node.make_leader()
+            self.become_leader()
         } else {
-            self.node.make_candidate()
+            self.become_candidate()
         }
+
     }
 }
