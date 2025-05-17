@@ -1,11 +1,10 @@
-use std::{
-    net::SocketAddr,
+use std::{net::SocketAddr, str::FromStr};
 
-    str::FromStr,};
-
-
-use crate::{dto::VoteResponse, state::{NodeId, Peers, Role}, storage::LogEntry};
-
+use crate::{
+    dto::VoteResponse,
+    state::{NodeId, Peers, Role},
+    storage::LogEntry,
+};
 
 pub enum AppendEntriesResult {
     Ok,
@@ -77,7 +76,6 @@ pub trait Consensus {
         last_log_index: u64,
         last_log_term: u64,
     ) -> VoteResponse {
-
         if term < self.current_term() {
             return VoteResponse::not_granted(self.current_term());
         }
@@ -88,8 +86,10 @@ pub trait Consensus {
 
         //NOTE: use something better for the id of the server
         let condidate_id_matches = self.voted_for().is_none_or(|addr| {
-            addr.eq(&NodeId::new(SocketAddr::from_str(candidate_id)
-                .expect("why candidate_id isnt a correct socketaddrs?")))
+            addr.eq(&NodeId::new(
+                SocketAddr::from_str(candidate_id)
+                    .expect("why candidate_id isnt a correct socketaddrs?"),
+            ))
         });
 
         let (last_term, last_index) = self.last_log_info();
@@ -115,7 +115,7 @@ pub trait Consensus {
     }
 
     fn last_log_info(&self) -> (u64, u64);
-fn peers(&self)->&Peers;
+    fn peers(&self) -> &Peers;
     fn leader(&self) -> Option<SocketAddr>;
     fn log_entries(&self) -> &Vec<LogEntry>;
     fn vote_for(&mut self, node: NodeId);

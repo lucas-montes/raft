@@ -5,12 +5,12 @@ use std::{fmt::Debug, net::SocketAddr, time::Duration};
 use tokio::task::JoinSet;
 
 use crate::{
-    consensus::Consensus, dto::{AppendEntriesResponse, VoteResponse}, raft_capnp::{self, raft}
+    consensus::Consensus,
+    dto::{AppendEntriesResponse, VoteResponse},
+    raft_capnp::{self, raft},
 };
 
 type Err = Box<dyn std::error::Error>;
-
-
 
 struct RequestError {
     index: usize,
@@ -35,7 +35,6 @@ pub async fn create_client(addr: &SocketAddr) -> Result<raft::Client, Err> {
 }
 
 trait Client: Consensus {
-
     async fn send_append_entries(
         request: capnp::capability::Request<
             raft::append_entries_params::Owned,
@@ -90,7 +89,10 @@ trait Client: Consensus {
         }
     }
 
-    async fn manage_append_entries_tasks(&self, mut tasks: JoinSet<Result<AppendEntriesResponse, RequestError>>){
+    async fn manage_append_entries_tasks(
+        &self,
+        mut tasks: JoinSet<Result<AppendEntriesResponse, RequestError>>,
+    ) {
         while let Some(res) = tasks.join_next().await {
             let task_result = match res {
                 Ok(response) => response,
@@ -116,8 +118,7 @@ trait Client: Consensus {
         }
     }
 
-
-    async fn prepare_append_entries_tasks(&mut self)->JoinSet<Result<AppendEntriesResponse, RequestError>> {
+    async fn prepare_append_entries_tasks(&mut self) {
         let mut tasks = JoinSet::new();
         let current_term = self.current_term();
         // let node_addr = self.state.addr().to_string();
@@ -135,7 +136,6 @@ trait Client: Consensus {
 
             // data.set_term(current_term);
 
-
             // leader.set_id("value");
             // leader.set_address("value");
             // // leader.set_client(value);
@@ -150,28 +150,49 @@ trait Client: Consensus {
         }
         //TODO: split in two, one to send, one to receive
 
-        tasks
+        // while let Some(res) = tasks.join_next().await {
+        //     let task_result = match res {
+        //         Ok(response) => response,
+        //         Err(err) => {
+        //             println!("error in append_entries: {:?}", err);
+        //             continue;
+        //         }
+        //     };
+        //     let append_entries_response = match task_result {
+        //         Ok(response) => response,
+        //         Err(error) => {
+        //             // self.peers[error.index].reconnect().await;
+        //             continue;
+        //         }
+        //     };
+
+        //     if let AppendEntriesResponse::Err(term) = append_entries_response {
+        //         //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
+        //         // self.become_follower(self.node.addr(), term);
+        //         println!("im a follower now so i do not send more hearbeats");
+        //         break;
+        //     };
+        // }
     }
 
-    async fn append_entries(&mut self) {
-        let tasks = self.prepare_append_entries_tasks().await;
-        self.manage_append_entries_tasks(tasks).await;
-    }
+    // async fn append_entries(&mut self) {
+    //     let tasks = self.prepare_append_entries_tasks().await;
+    //     self.manage_append_entries_tasks(tasks).await;
+    // }
 
     // async fn vote(&mut self){
     //     let tasks = self.prepare_vote_tasks().await;
     //     self.manage_vote_tasks(tasks).await;
     // }
 
-
     async fn send_vote(
-        reply: capnp::capability::Promise<capnp::capability::Response<raft::request_vote_results::Owned>, capnp::Error>,
+        reply: Result<capnp::capability::Response<raft::request_vote_results::Owned>, capnp::Error>,
         index: usize,
     ) -> Result<VoteResponse, RequestError> {
         // let reply = request.send().promise.await;
         println!("sending vote");
 
-        let response = match reply.await {
+        let response = match reply {
             Ok(r) => r,
             Err(err) => {
                 println!(
@@ -204,32 +225,32 @@ trait Client: Consensus {
             }
         };
     }
-    async fn manage_vote_tasks(&mut self, mut tasks: JoinSet<Result<VoteResponse, RequestError>>){
-                //NOTE: we start with one vote because we vote for ourself
-                let mut votes = 1;
-                while let Some(res) = tasks.join_next().await {
-                    match res.expect("why joinhandle failed?") {
-                        Ok(r) => {
-                            votes += r.vote_granted() as u64;
-                        }
-                        Err(error) => {
-                            // self.peers[error.index].reconnect().await;
-                        }
-                    }
+    async fn manage_vote_tasks(&mut self, mut tasks: JoinSet<Result<VoteResponse, RequestError>>) {
+        //NOTE: we start with one vote because we vote for ourself
+        let mut votes = 1;
+        while let Some(res) = tasks.join_next().await {
+            match res.expect("why joinhandle failed?") {
+                Ok(r) => {
+                    votes += r.vote_granted() as u64;
                 }
+                Err(error) => {
+                    // self.peers[error.index].reconnect().await;
+                }
+            }
+        }
 
-                //NOTE: we add one to the number of nodes to count ourself
-                let num_nodes = self.peers().len() + 1;
-                let has_majority = votes > num_nodes.div_euclid(2) as u64;
-                if has_majority || num_nodes.eq(&1) {
-                    self.become_leader()
-                } else {
-                    self.become_candidate()
-                }
+        //NOTE: we add one to the number of nodes to count ourself
+        let num_nodes = self.peers().len() + 1;
+        let has_majority = votes > num_nodes.div_euclid(2) as u64;
+        if has_majority || num_nodes.eq(&1) {
+            self.become_leader()
+        } else {
+            self.become_candidate()
+        }
     }
 
     async fn prepare_vote_tasks(&mut self) {
-        let mut tasks= JoinSet::new();
+        let mut tasks = JoinSet::new();
         let current_term = self.current_term();
         // let addr = self.node.addr()();
         let (last_term, last_index) = self.last_log_info();
@@ -245,21 +266,25 @@ trait Client: Consensus {
             request.get().set_last_log_index(last_index);
             request.get().set_last_log_term(last_term);
             let p = request.send().promise;
-            let t = Self::send_vote(p, index);
+            // let t = Self::send_vote(p, index);
 
-
-            tasks.spawn_local(t);
+            tasks.spawn_local(p);
         }
+
         let mut votes = 1;
         while let Some(res) = tasks.join_next().await {
-            match res.expect("why joinhandle failed?") {
-                Ok(r) => {
+
+            let res = match res {
+                Ok(r) => {r
                     // votes += r.vote_granted() as u64;
                 }
                 Err(error) => {
                     // self.peers()[error.index].reconnect().await;
+                    return;
                 }
-            }
+            };
+            Self::send_vote(res, 0).await;
+
         }
 
         //NOTE: we add one to the number of nodes to count ourself
@@ -270,6 +295,5 @@ trait Client: Consensus {
         } else {
             self.become_candidate()
         }
-
     }
 }

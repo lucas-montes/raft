@@ -11,10 +11,10 @@ pub mod raft_capnp {
 
 mod client;
 mod consensus;
-mod storage;
 mod dto;
-mod state;
 mod server;
+mod state;
+mod storage;
 
 fn get_election_timeout() -> Duration {
     let election_timeout = random_range(3.0..5.0);
@@ -42,11 +42,11 @@ async fn main() {
     tokio::task::LocalSet::new()
         .run_until(async move {
             let latency = random_range(1.0..2.9);
-            let mut state = State::new(NodeId::new(cli.addr));
+            let state = Rc::new(State::new(NodeId::new(cli.addr)));
             let (tx, rx) = tokio::sync::mpsc::channel(100);
-            let mut service = Node::new(&mut state, latency, rx);
+            let mut service = Node::new(state.clone(), latency, rx);
 
-            let server = Server::new(Rc::new(state), tx);
+            let server = Server::new(state, tx);
 
             let server_task = tokio::task::spawn_local(server.run());
 

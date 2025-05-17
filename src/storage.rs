@@ -1,6 +1,4 @@
-use std::{ cmp::Ordering, fmt::Debug, ops::Deref};
-
-
+use std::{cmp::Ordering, fmt::Debug, ops::Deref};
 
 #[derive(Debug, Eq)]
 pub struct LogEntry {

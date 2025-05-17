@@ -56,14 +56,12 @@ impl TryFrom<raft_capnp::append_entries_response::Reader<'_>> for AppendEntriesR
     }
 }
 
-
-
 pub struct Msg<M, R> {
     pub msg: M,
     pub sender: oneshot::Sender<R>,
 }
 
-pub struct VoteRequest{
+pub struct VoteRequest {
     term: u64,
     candidate_id: String,
     last_log_index: u64,
@@ -85,47 +83,51 @@ pub enum ServerMsg {
 }
 
 impl ServerMsg {
-   pub fn request_append_entries(term: u64,
+    pub fn request_append_entries(
+        term: u64,
         leader_id: String,
         prev_log_index: u64,
         prev_log_term: u64,
         entries: Vec<LogEntry>,
-        leader_commit: u64,)->(Self, Receiver<AppendEntriesResult>){
-            let (tx, rx)= oneshot::channel();
+        leader_commit: u64,
+    ) -> (Self, Receiver<AppendEntriesResult>) {
+        let (tx, rx) = oneshot::channel();
 
-            let req = AppendEntriesRequest{
-                term,
-                leader_id,
-                prev_log_index,
-                prev_log_term,
-                entries,
-                leader_commit,
-            };
-            let msg = Self::AppendEntries(Msg{
-                msg: req,
-                sender: tx,
-            });
+        let req = AppendEntriesRequest {
+            term,
+            leader_id,
+            prev_log_index,
+            prev_log_term,
+            entries,
+            leader_commit,
+        };
+        let msg = Self::AppendEntries(Msg {
+            msg: req,
+            sender: tx,
+        });
 
-(msg, rx)
+        (msg, rx)
     }
 
-   pub fn request_vote(term: u64,
+    pub fn request_vote(
+        term: u64,
         candidate_id: String,
         last_log_index: u64,
-        last_log_term: u64,)->(Self, Receiver<VoteResponse>){
-            let (tx, rx)= oneshot::channel();
+        last_log_term: u64,
+    ) -> (Self, Receiver<VoteResponse>) {
+        let (tx, rx) = oneshot::channel();
 
-            let req = VoteRequest{
-                term,
-                candidate_id,
-                last_log_index,
-                last_log_term,
-            };
-            let msg = Self::Vote(Msg{
-                msg: req,
-                sender: tx,
-            });
+        let req = VoteRequest {
+            term,
+            candidate_id,
+            last_log_index,
+            last_log_term,
+        };
+        let msg = Self::Vote(Msg {
+            msg: req,
+            sender: tx,
+        });
 
-(msg, rx)
+        (msg, rx)
     }
 }

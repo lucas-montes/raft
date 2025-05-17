@@ -3,17 +3,20 @@ use std::rc::Rc;
 use capnp::capability::Promise;
 use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
-use tokio::sync::{mpsc::Sender};
-
+use tokio::sync::mpsc::Sender;
 
 use crate::{
-    consensus::{ AppendEntriesResult, }, dto::{ ServerMsg, }, raft_capnp::{command, raft}, state::{Role, State}, storage::LogEntry
+    consensus::{AppendEntriesResult, Consensus},
+    dto::ServerMsg,
+    raft_capnp::{command, raft},
+    state::{Role, State},
+    storage::LogEntry,
 };
 
 #[derive(Debug, Clone)]
 pub struct Server {
     state: Rc<State>,
-    state_channel: Sender<ServerMsg>
+    state_channel: Sender<ServerMsg>,
 }
 
 impl Server {
@@ -40,11 +43,12 @@ impl Server {
     }
 
     pub fn new(state: Rc<State>, state_channel: Sender<ServerMsg>) -> Self {
-        Self { state, state_channel }
+        Self {
+            state,
+            state_channel,
+        }
     }
 }
-
-
 
 impl command::Server for Server {
     fn start_transaction(
@@ -86,7 +90,7 @@ impl raft::Server for Server {
         }
         let leader = pry!(request.get_leader());
 
-        let (msg, rx)= ServerMsg::request_append_entries(
+        let (msg, rx) = ServerMsg::request_append_entries(
             request.get_term(),
             "leader".into(),
             request.get_prev_log_index(),
@@ -95,12 +99,16 @@ impl raft::Server for Server {
             request.get_leader_commit(),
         );
 
-        if let Err(err) =self.state_channel.blocking_send(msg){
+        self.state.become_candidate();
+
+        if let Err(err) = self.state_channel.blocking_send(msg) {
             println!("error sending the append_entries to the state {err}");
-            return Promise::err(capnp::Error::failed("error sending the append_entries to the state".into()));
+            return Promise::err(capnp::Error::failed(
+                "error sending the append_entries to the state".into(),
+            ));
         };
 
-        match rx.blocking_recv(){
+        match rx.blocking_recv() {
             Ok(resp) => {
                 let entries_client = pry!(request.get_handle_entries());
 
@@ -114,34 +122,31 @@ impl raft::Server for Server {
                         }
 
                         AppendEntriesResult::TermMismatch(term) => {
-                                    response.set_err(term);
-                                }
-                                AppendEntriesResult::LogEntriesMismatch {
-                                    last_index,
-                                    last_term,
-                                } => {
-                                    let mut entries_client = entries_client.get_request();
-                                    entries_client.get().set_last_log_index(last_index);
-                                    entries_client.get().set_last_log_term(last_term);
-                                    let entries_up_to_date = entries_client.send().promise.await?;
-                                    //TODO: use the response to update its log's entries
+                            response.set_err(term);
+                        }
+                        AppendEntriesResult::LogEntriesMismatch {
+                            last_index,
+                            last_term,
+                        } => {
+                            let mut entries_client = entries_client.get_request();
+                            entries_client.get().set_last_log_index(last_index);
+                            entries_client.get().set_last_log_term(last_term);
+                            let entries_up_to_date = entries_client.send().promise.await?;
+                            //TODO: use the response to update its log's entries
 
-                                    response.set_ok(());
-                                }
-
+                            response.set_ok(());
+                        }
                     }
                     Ok(())
                 })
-
             }
             Err(err) => {
                 println!("error receiving the append_entries response {err}");
-                Promise::err(capnp::Error::failed("error receiving the append_entries response".into()))
+                Promise::err(capnp::Error::failed(
+                    "error receiving the append_entries response".into(),
+                ))
             }
         }
-
-
-
     }
 
     /// The node (a follower or candidate) receives a request from an other candidate to vote for it
@@ -157,29 +162,28 @@ impl raft::Server for Server {
         let last_log_term = request.get_last_log_term();
         let term = request.get_term();
 
-       let (msg, rx)= ServerMsg::request_vote(
-            term,
-            candidate_id,
-            last_log_index,
-            last_log_term,
-        );
+        let (msg, rx) = ServerMsg::request_vote(term, candidate_id, last_log_index, last_log_term);
 
-        if let Err(err) =self.state_channel.blocking_send(msg){
+        if let Err(err) = self.state_channel.blocking_send(msg) {
             println!("error sending the request_vote to the state {err}");
-            return Promise::err(capnp::Error::failed("error sending the request_vote to the state".into()));
+            return Promise::err(capnp::Error::failed(
+                "error sending the request_vote to the state".into(),
+            ));
         };
 
-        match rx.blocking_recv(){
+        match rx.blocking_recv() {
             Ok(resp) => {
                 let mut response = pry!(results.get().get_response());
 
-        response.set_vote_granted(resp.vote_granted());
-        response.set_term(resp.term());
-        Promise::ok(())
+                response.set_vote_granted(resp.vote_granted());
+                response.set_term(resp.term());
+                Promise::ok(())
             }
             Err(err) => {
                 println!("error receiving the request_vote response {err}");
-                Promise::err(capnp::Error::failed("error receiving the request_vote response".into()))
+                Promise::err(capnp::Error::failed(
+                    "error receiving the request_vote response".into(),
+                ))
             }
         }
     }

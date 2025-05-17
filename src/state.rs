@@ -1,4 +1,14 @@
-use std::{cmp::Ordering, fmt::Debug, net::SocketAddr, ops::{Deref, DerefMut}, str::FromStr, time::Duration};
+use std::{
+    cell::RefCell,
+    cmp,
+    fmt::Debug,
+    net::SocketAddr,
+    ops::{Deref, DerefMut},
+    rc::Rc,
+    str::FromStr,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 
 use tokio::{
     sync::mpsc::Receiver,
@@ -6,9 +16,9 @@ use tokio::{
 };
 
 use crate::{
-    client::create_client, consensus::Consensus, dto::ServerMsg, raft_capnp::raft, storage::LogEntries
+    client::create_client, consensus::Consensus, dto::ServerMsg, raft_capnp::raft,
+    storage::LogEntries,
 };
-
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub enum Role {
@@ -37,7 +47,11 @@ impl Peer {
 
     async fn new(addr: SocketAddr) -> Self {
         let client = Self::connect(&addr).await;
-        Self { id: NodeId(addr), addr, client }
+        Self {
+            id: NodeId(addr),
+            addr,
+            client,
+        }
     }
 
     async fn reconnect(&mut self) {
@@ -60,7 +74,7 @@ impl Peer {
     }
 }
 
-#[derive(Debug, Eq)]
+#[derive(Debug, Eq, Copy, Clone)]
 pub struct NodeId(SocketAddr);
 impl NodeId {
     pub fn new(addr: SocketAddr) -> Self {
@@ -85,13 +99,13 @@ impl PartialEq for NodeId {
 }
 
 impl PartialOrd for NodeId {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for NodeId {
-    fn cmp(&self, other: &Self) -> Ordering {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
         self.0.cmp(&other.0)
     }
 }
@@ -99,15 +113,15 @@ impl Ord for NodeId {
 //NOTE: this needs to be persisted before responding to RPCs
 #[derive(Default, Debug)]
 pub struct HardState {
-    current_term: u64,
+    current_term: AtomicU64,
     voted_for: Option<NodeId>,
     log_entries: LogEntries,
 }
 
 #[derive(Default, Debug)]
 pub struct SoftState {
-    commit_index: u64,
-    last_applied: u64,
+    commit_index: AtomicU64,
+    last_applied: AtomicU64,
 }
 
 #[derive(Default, Debug)]
@@ -141,7 +155,7 @@ pub struct State {
     leader_state: LeaderState,
     hard_state: HardState,
     soft_state: SoftState,
-    peers: Peers,
+    peers: RefCell<Peers>,
 }
 
 impl State {
@@ -157,66 +171,68 @@ impl State {
     }
 
     pub fn role(&self) -> Role {
-        self.role
+        todo!()
+        // self.role
     }
-
 }
 
-impl Consensus for State{
-
-    fn peers(&self)->&Peers {
-        &self.peers
+impl Consensus for State {
+    fn peers(&self) -> &Peers {
+        // &self.peers
+        todo!()
     }
     fn update_commit_index(&mut self, commit_index: u64) {
-        self.soft_state.commit_index = commit_index;
+        self.soft_state
+            .commit_index
+            .store(commit_index, Ordering::Release);
     }
 
-fn log_entries(&self) -> &Vec<crate::storage::LogEntry> {
-    // &self.hard_state.log_entries.0
-    todo!()
-}
+    fn log_entries(&self) -> &Vec<crate::storage::LogEntry> {
+        // &self.hard_state.log_entries.0
+        todo!()
+    }
 
     fn become_candidate(&mut self) {
-        self.role = Role::Candidate;
-        self.hard_state.current_term += 1;
-        // self.hard_state.voted_for = Some(self.id);
+        *self.role.borrow_mut() = Role::Candidate;
+        self.hard_state.current_term.fetch_add(1, Ordering::Release);
+        self.hard_state.voted_for = Some(self.id);
         // self.soft_state.commit_index = 0;
         self.leader = None;
     }
 
-fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
-    self.hard_state.current_term = new_term;
-    self.hard_state.voted_for = None;
-    self.soft_state.commit_index = 0;
-    self.leader = leader_id.map(NodeId::new);
-}
+    fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
+        self.hard_state.current_term.store(new_term, Ordering::Release);
+        self.hard_state.voted_for = None;
+        // self.soft_state.commit_index = 0;
+        self.leader = leader_id.map(NodeId::new);
+    }
 
-fn become_leader(&mut self) {
-    self.role = Role::Leader;
-    // self.leader = Some(self.id);
-    // self.leader_state.match_index = vec![(self.id, 0)];
-    // self.leader_state.next_index = vec![(self.id, 0)];
-}
+    fn become_leader(&mut self) {
+        *self.role.borrow_mut() = Role::Leader;
+        // self.leader = Some(self.id);
+        // self.leader_state.match_index = vec![(self.id, 0)];
+        // self.leader_state.next_index = vec![(self.id, 0)];
+    }
 
-fn leader(&self) -> Option<SocketAddr> {
-    // self.leader.map(|id| id.addr())
-    todo!()
-}
+    fn leader(&self) -> Option<SocketAddr> {
+        // self.leader.map(|id| id.addr())
+        todo!()
+    }
 
-fn vote_for(&mut self, node: NodeId) {
-    self.hard_state.voted_for = Some(node);
-}
+    fn vote_for(&mut self, node: NodeId) {
+        self.hard_state.voted_for = Some(node);
+    }
 
-fn voted_for(&self) -> Option<&NodeId> {
-    self.hard_state.voted_for.as_ref()
-}
+    fn voted_for(&self) -> Option<&NodeId> {
+        self.hard_state.voted_for.as_ref()
+    }
 
     fn current_term(&self) -> u64 {
-        self.hard_state.current_term
+        self.hard_state.current_term.load(Ordering::Relaxed)
     }
 
     fn commit_index(&self) -> u64 {
-        self.soft_state.commit_index
+        self.soft_state.commit_index.load(Ordering::Relaxed)
     }
 
     fn last_log_info(&self) -> (u64, u64) {
@@ -224,21 +240,24 @@ fn voted_for(&self) -> Option<&NodeId> {
     }
 }
 
-
 #[derive(Debug)]
 pub struct Node {
-    state: &'static mut State,
+    state: Rc<State>,
     latency: f64,
     server_channel: Receiver<ServerMsg>,
 }
 
 impl Node {
-    pub fn new(state: &'static mut State,latency: f64,  server_channel: Receiver<ServerMsg>) -> Self {
-        Self { state, server_channel, latency }
+    pub fn new(state: Rc<State>, latency: f64, server_channel: Receiver<ServerMsg>) -> Self {
+        Self {
+            state,
+            server_channel,
+            latency,
+        }
     }
 
     pub async fn add_peer(&mut self, addr: SocketAddr) {
-        self.state.peers.push(Peer::new(addr).await);
+        self.state.peers.borrow_mut().push(Peer::new(addr).await);
     }
 
     pub async fn run(self) {
@@ -248,6 +267,7 @@ impl Node {
         let mut server_conn = self.server_channel;
 
         loop {
+            let role = self.state.role.borrow();
             tokio::select! {
                 //  Incoming RPCs from other nodes
                 Some(rpc) = server_conn.recv() => {
@@ -258,14 +278,14 @@ impl Node {
                 }
 
                 //  election timeout fires → start election
-                _ = &mut election_timeout, if self.state.role != Role::Leader => {
+                _ = &mut election_timeout, if *role != Role::Leader => {
                     // self.become_candidate().await;
                     // Clear votes, increment term, vote for self, send RequestVotes...
 
                 }
 
                 //  heartbeat tick → send heartbeats if leader
-                _ = heartbeat_interval.tick(), if self.state.role == Role::Leader => {
+                _ = heartbeat_interval.tick(), if *role == Role::Leader => {
                     //self.send_heartbeats().await;
                 }
             }
