@@ -1,4 +1,11 @@
-use std::{cmp::Ordering, fmt::Debug, net::SocketAddr, ops::{Deref, DerefMut}, str::FromStr, time::Duration};
+use std::{
+    cmp::Ordering,
+    fmt::Debug,
+    net::SocketAddr,
+    ops::{Deref, DerefMut},
+    str::FromStr,
+    time::Duration,
+};
 
 use tokio::{
     sync::mpsc::Receiver,
@@ -6,9 +13,9 @@ use tokio::{
 };
 
 use crate::{
-    client::create_client, consensus::Consensus, dto::ServerMsg, raft_capnp::raft, storage::LogEntries
+    client::create_client, consensus::Consensus, dto::RaftMsg, raft_capnp::raft,
+    storage::LogEntries,
 };
-
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub enum Role {
@@ -38,10 +45,14 @@ impl Peer {
 
     async fn new(addr: SocketAddr) -> Self {
         let client = Self::connect(&addr).await;
-        Self { id: NodeId(addr), addr, client }
+        Self {
+            id: NodeId(addr),
+            addr,
+            client,
+        }
     }
 
-    async fn reconnect(&mut self) {
+    pub async fn reconnect(&mut self) {
         self.client = Self::connect(&self.addr).await;
     }
 
@@ -61,7 +72,7 @@ impl Peer {
     }
 }
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, Eq, Copy)]
 pub struct NodeId(SocketAddr);
 impl NodeId {
     pub fn new(addr: SocketAddr) -> Self {
@@ -160,57 +171,55 @@ impl State {
     pub fn role(&self) -> Role {
         self.role
     }
-
 }
 
-impl Consensus for State{
-
-    fn peers(&self)->&Peers {
+impl Consensus for State {
+    fn peers(&self) -> &Peers {
         &self.peers
     }
     fn update_commit_index(&mut self, commit_index: u64) {
         self.soft_state.commit_index = commit_index;
     }
 
-fn log_entries(&self) -> &Vec<crate::storage::LogEntry> {
-    // &self.hard_state.log_entries.0
-    todo!()
-}
+    fn log_entries(&self) -> &Vec<crate::storage::LogEntry> {
+        // &self.hard_state.log_entries.0
+        todo!()
+    }
 
     fn become_candidate(&mut self) {
         self.role = Role::Candidate;
         self.hard_state.current_term += 1;
-        // self.hard_state.voted_for = Some(self.id);
+        self.hard_state.voted_for = Some(self.id);
         // self.soft_state.commit_index = 0;
         self.leader = None;
     }
 
-fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
-    self.hard_state.current_term = new_term;
-    self.hard_state.voted_for = None;
-    self.soft_state.commit_index = 0;
-    self.leader = leader_id.map(NodeId::new);
-}
+    fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
+        self.hard_state.current_term = new_term;
+        self.hard_state.voted_for = None;
+        self.soft_state.commit_index = 0;
+        self.leader = leader_id.map(NodeId::new);
+    }
 
-fn become_leader(&mut self) {
-    self.role = Role::Leader;
-    // self.leader = Some(self.id);
-    // self.leader_state.match_index = vec![(self.id, 0)];
-    // self.leader_state.next_index = vec![(self.id, 0)];
-}
+    fn become_leader(&mut self) {
+        self.role = Role::Leader;
+        self.leader = Some(self.id);
+        // self.leader_state.match_index = vec![(self.id, 0)];
+        // self.leader_state.next_index = vec![(self.id, 0)];
+    }
 
-fn leader(&self) -> Option<SocketAddr> {
-    // self.leader.map(|id| id.addr())
-    todo!()
-}
+    fn leader(&self) -> Option<SocketAddr> {
+        // self.leader.map(|id| id.addr())
+        todo!()
+    }
 
-fn vote_for(&mut self, node: NodeId) {
-    self.hard_state.voted_for = Some(node);
-}
+    fn vote_for(&mut self, node: NodeId) {
+        self.hard_state.voted_for = Some(node);
+    }
 
-fn voted_for(&self) -> Option<&NodeId> {
-    self.hard_state.voted_for.as_ref()
-}
+    fn voted_for(&self) -> Option<&NodeId> {
+        self.hard_state.voted_for.as_ref()
+    }
 
     fn current_term(&self) -> u64 {
         self.hard_state.current_term
@@ -225,17 +234,27 @@ fn voted_for(&self) -> Option<&NodeId> {
     }
 }
 
-
 #[derive(Debug)]
 pub struct Node {
     state: State,
     latency: f64,
-    server_channel: Receiver<ServerMsg>,
+    raft_channel: Receiver<RaftMsg>,
+    commands_channel: Receiver<RaftMsg>,
 }
 
 impl Node {
-    pub fn new(state:State,latency: f64,  server_channel: Receiver<ServerMsg>) -> Self {
-        Self { state, server_channel, latency }
+    pub fn new(
+        state: State,
+        latency: f64,
+        raft_channel: Receiver<RaftMsg>,
+        commands_channel: Receiver<RaftMsg>,
+    ) -> Self {
+        Self {
+            state,
+            raft_channel,
+            latency,
+            commands_channel,
+        }
     }
 
     pub async fn add_peer(&mut self, addr: SocketAddr) {
@@ -246,12 +265,17 @@ impl Node {
         let dur = Duration::from_secs_f64(self.latency);
         let mut heartbeat_interval = interval(dur);
         let mut election_timeout = Box::pin(sleep(dur));
-        let mut server_conn = self.server_channel;
+        let mut raft_channel = self.raft_channel;
+        let mut commands_channel = self.commands_channel;
 
         loop {
             tokio::select! {
-                //  Incoming RPCs from other nodes
-                Some(rpc) = server_conn.recv() => {
+                //  Incoming RPCs from external users
+                Some(rpc) = commands_channel.recv() => {
+
+                }
+
+                Some(rpc) = raft_channel.recv() => {
                     election_timeout.as_mut().reset(Instant::now() + dur);
                     //self.handle_rpc(rpc).await;
                     // on AppendEntries success or higher‐term RPC:

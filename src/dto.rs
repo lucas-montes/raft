@@ -77,12 +77,12 @@ pub struct AppendEntriesRequest {
     leader_commit: u64,
 }
 
-pub enum ServerMsg {
+pub enum RaftMsg {
     AppendEntries(Msg<AppendEntriesRequest, AppendEntriesResult>),
     Vote(Msg<VoteRequest, VoteResponse>),
 }
 
-impl ServerMsg {
+impl RaftMsg {
     pub fn request_append_entries(
         term: u64,
         leader_id: String,

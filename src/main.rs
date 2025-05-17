@@ -12,6 +12,7 @@ pub mod raft_capnp {
 mod client;
 mod consensus;
 mod dto;
+mod node;
 mod server;
 mod state;
 mod storage;
@@ -42,13 +43,14 @@ async fn main() {
     tokio::task::LocalSet::new()
         .run_until(async move {
             let latency = random_range(1.0..2.9);
-            let state = Rc::new(State::new(NodeId::new(cli.addr)));
-            let (tx, rx) = tokio::sync::mpsc::channel(100);
-            let mut service = Node::new(state.clone(), latency, rx);
+            let state = State::new(NodeId::new(cli.addr.clone()));
+            let (rtx, rrx) = tokio::sync::mpsc::channel(100);
+            let (ctx, crx) = tokio::sync::mpsc::channel(100);
+            let mut service = Node::new(state, latency, rrx, crx);
 
-            let server = Server::new(state, tx);
+            let server = Server::new(rtx, ctx);
 
-            let server_task = tokio::task::spawn_local(server.run());
+            let server_task = tokio::task::spawn_local(server.run(cli.addr));
 
             for node in nodes {
                 service.add_peer(node).await;

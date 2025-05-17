@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{net::SocketAddr, rc::Rc};
 
 use capnp::capability::Promise;
 use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
@@ -6,8 +6,8 @@ use futures::AsyncReadExt;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    consensus::{AppendEntriesResult, Consensus},
-    dto::ServerMsg,
+    consensus::AppendEntriesResult,
+    dto::RaftMsg,
     raft_capnp::{command, raft},
     state::{Role, State},
     storage::LogEntry,
@@ -15,14 +15,14 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Server {
-    state: Rc<State>,
-    state_channel: Sender<ServerMsg>,
+    raft_channel: Sender<RaftMsg>,
+    commands_channel: Sender<RaftMsg>,
 }
 
 impl Server {
-    pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
         println!("server start");
-        let listener = tokio::net::TcpListener::bind(&self.state.addr()).await?;
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
         let client: raft::Client = capnp_rpc::new_client(self);
         loop {
             let (stream, _) = listener.accept().await?;
@@ -42,10 +42,10 @@ impl Server {
         }
     }
 
-    pub fn new(state: Rc<State>, state_channel: Sender<ServerMsg>) -> Self {
+    pub fn new(raft_channel: Sender<RaftMsg>, commands_channel: Sender<RaftMsg>) -> Self {
         Self {
-            state,
-            state_channel,
+            raft_channel,
+            commands_channel,
         }
     }
 }
@@ -56,14 +56,13 @@ impl command::Server for Server {
         params: command::StartTransactionParams,
         mut results: command::StartTransactionResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
-        if self.state.role() == Role::Leader {
-            results
-                .get()
-                .set_leader(capnp_rpc::new_client(self.clone()));
-        } else {
-            // self.node.leader();
-            // results.get().set_leader(peer.client.clone());
-        }
+        // if self.state.role() == Role::Leader {
+        //     results
+        //         .get()
+        //         .set_leader(capnp_rpc::new_client(self.clone()));
+        // } else {
+        //     results.get().set_leader(peer.client.clone());
+        // }
         Promise::ok(())
     }
 }
@@ -90,7 +89,7 @@ impl raft::Server for Server {
         }
         let leader = pry!(request.get_leader());
 
-        let (msg, rx) = ServerMsg::request_append_entries(
+        let (msg, rx) = RaftMsg::request_append_entries(
             request.get_term(),
             "leader".into(),
             request.get_prev_log_index(),
@@ -99,7 +98,7 @@ impl raft::Server for Server {
             request.get_leader_commit(),
         );
 
-        if let Err(err) = self.state_channel.blocking_send(msg) {
+        if let Err(err) = self.raft_channel.blocking_send(msg) {
             println!("error sending the append_entries to the state {err}");
             return Promise::err(capnp::Error::failed(
                 "error sending the append_entries to the state".into(),
@@ -160,9 +159,9 @@ impl raft::Server for Server {
         let last_log_term = request.get_last_log_term();
         let term = request.get_term();
 
-        let (msg, rx) = ServerMsg::request_vote(term, candidate_id, last_log_index, last_log_term);
+        let (msg, rx) = RaftMsg::request_vote(term, candidate_id, last_log_index, last_log_term);
 
-        if let Err(err) = self.state_channel.blocking_send(msg) {
+        if let Err(err) = self.raft_channel.blocking_send(msg) {
             println!("error sending the request_vote to the state {err}");
             return Promise::err(capnp::Error::failed(
                 "error sending the request_vote to the state".into(),
