@@ -7,7 +7,7 @@ use tokio::task::JoinSet;
 use crate::{
     consensus::Consensus,
     dto::{AppendEntriesResponse, VoteResponse},
-    raft_capnp::{self, raft},
+    raft_capnp::{self, raft}, state::Peer,
 };
 
 type Err = Box<dyn std::error::Error>;
@@ -34,7 +34,7 @@ pub async fn create_client(addr: &SocketAddr) -> Result<raft::Client, Err> {
     Ok(client)
 }
 
-trait Client: Consensus {
+trait Client: Consensus where Self: Sized{
     async fn send_append_entries(
         request: capnp::capability::Request<
             raft::append_entries_params::Owned,
@@ -118,7 +118,7 @@ trait Client: Consensus {
         }
     }
 
-    async fn prepare_append_entries_tasks(&mut self) {
+    async fn prepare_append_entries_tasks(mut self) {
         let mut tasks = JoinSet::new();
         let current_term = self.current_term();
         // let node_addr = self.state.addr().to_string();
@@ -126,7 +126,8 @@ trait Client: Consensus {
         let (last_term, last_index) = self.last_log_info();
 
         println!("sending heartbeats");
-        for (index, peer) in self.peers().iter().enumerate() {
+
+        for (index, peer) in  self.peers().iter().enumerate() {
             let client = peer.client();
 
             let mut request = client.append_entries_request();
@@ -180,10 +181,10 @@ trait Client: Consensus {
     //     self.manage_append_entries_tasks(tasks).await;
     // }
 
-    // async fn vote(&mut self){
-    //     let tasks = self.prepare_vote_tasks().await;
-    //     self.manage_vote_tasks(tasks).await;
-    // }
+    async fn vote(&mut self){
+        let tasks = self.prepare_vote_tasks().await;
+        self.manage_vote_tasks(tasks).await;
+    }
 
     async fn send_vote(
         reply: Result<capnp::capability::Response<raft::request_vote_results::Owned>, capnp::Error>,
@@ -225,10 +226,11 @@ trait Client: Consensus {
             }
         };
     }
-    async fn manage_vote_tasks(&mut self, mut tasks: JoinSet<Result<VoteResponse, RequestError>>) {
+    async fn manage_vote_tasks(&mut self, mut tasks: JoinSet<Result<capnp::capability::Response<raft::request_vote_results::Owned>, capnp::Error>>) {
         //NOTE: we start with one vote because we vote for ourself
         let mut votes = 1;
         while let Some(res) = tasks.join_next().await {
+            Self::send_vote(reply, index)
             match res.expect("why joinhandle failed?") {
                 Ok(r) => {
                     votes += r.vote_granted() as u64;
@@ -249,7 +251,7 @@ trait Client: Consensus {
         }
     }
 
-    async fn prepare_vote_tasks(&mut self) {
+    async fn prepare_vote_tasks(&mut self) -> JoinSet<Result<capnp::capability::Response<raft::request_vote_results::Owned>, capnp::Error>>{
         let mut tasks = JoinSet::new();
         let current_term = self.current_term();
         // let addr = self.node.addr()();
@@ -270,30 +272,30 @@ trait Client: Consensus {
 
             tasks.spawn_local(p);
         }
+        tasks
+        // let mut votes = 1;
+        // while let Some(res) = tasks.join_next().await {
 
-        let mut votes = 1;
-        while let Some(res) = tasks.join_next().await {
+        //     let res = match res {
+        //         Ok(r) => {r
+        //             // votes += r.vote_granted() as u64;
+        //         }
+        //         Err(error) => {
+        //             // self.peers()[error.index].reconnect().await;
+        //             return;
+        //         }
+        //     };
+        //     Self::send_vote(res, 0).await;
 
-            let res = match res {
-                Ok(r) => {r
-                    // votes += r.vote_granted() as u64;
-                }
-                Err(error) => {
-                    // self.peers()[error.index].reconnect().await;
-                    return;
-                }
-            };
-            Self::send_vote(res, 0).await;
+        // }
 
-        }
-
-        //NOTE: we add one to the number of nodes to count ourself
-        let num_nodes = self.peers().len() + 1;
-        let has_majority = votes > num_nodes.div_euclid(2) as u64;
-        if has_majority || num_nodes.eq(&1) {
-            self.become_leader()
-        } else {
-            self.become_candidate()
-        }
+        // //NOTE: we add one to the number of nodes to count ourself
+        // let num_nodes = self.peers().len() + 1;
+        // let has_majority = votes > num_nodes.div_euclid(2) as u64;
+        // if has_majority || num_nodes.eq(&1) {
+        //     self.become_leader()
+        // } else {
+        //     self.become_candidate()
+        // }
     }
 }

@@ -99,8 +99,6 @@ impl raft::Server for Server {
             request.get_leader_commit(),
         );
 
-        self.state.become_candidate();
-
         if let Err(err) = self.state_channel.blocking_send(msg) {
             println!("error sending the append_entries to the state {err}");
             return Promise::err(capnp::Error::failed(
