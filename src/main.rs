@@ -12,15 +12,10 @@ pub mod raft_capnp {
 mod client;
 mod consensus;
 mod dto;
-mod node;
 mod server;
 mod state;
 mod storage;
 
-fn get_election_timeout() -> Duration {
-    let election_timeout = random_range(3.0..5.0);
-    Duration::from_secs_f64(election_timeout)
-}
 
 #[derive(Debug, Parser)]
 pub struct Cli {

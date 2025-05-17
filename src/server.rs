@@ -7,7 +7,7 @@ use tokio::sync::mpsc::Sender;
 
 use crate::{
     consensus::AppendEntriesResult,
-    dto::RaftMsg,
+    dto::{CommandMsg, RaftMsg},
     raft_capnp::{command, raft},
     state::{Role, State},
     storage::LogEntry,
@@ -16,7 +16,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Server {
     raft_channel: Sender<RaftMsg>,
-    commands_channel: Sender<RaftMsg>,
+    commands_channel: Sender<CommandMsg>,
 }
 
 impl Server {
@@ -42,7 +42,7 @@ impl Server {
         }
     }
 
-    pub fn new(raft_channel: Sender<RaftMsg>, commands_channel: Sender<RaftMsg>) -> Self {
+    pub fn new(raft_channel: Sender<RaftMsg>, commands_channel: Sender<CommandMsg>) -> Self {
         Self {
             raft_channel,
             commands_channel,

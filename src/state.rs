@@ -13,7 +13,7 @@ use tokio::{
 };
 
 use crate::{
-    client::create_client, consensus::Consensus, dto::RaftMsg, raft_capnp::raft,
+    client::create_client, consensus::Consensus, dto::{CommandMsg, RaftMsg}, raft_capnp::raft,
     storage::LogEntries,
 };
 
@@ -74,6 +74,7 @@ impl Peer {
 
 #[derive(Debug, Clone, Eq, Copy)]
 pub struct NodeId(SocketAddr);
+
 impl NodeId {
     pub fn new(addr: SocketAddr) -> Self {
         Self(addr)
@@ -239,7 +240,7 @@ pub struct Node {
     state: State,
     latency: f64,
     raft_channel: Receiver<RaftMsg>,
-    commands_channel: Receiver<RaftMsg>,
+    commands_channel: Receiver<CommandMsg>,
 }
 
 impl Node {
@@ -247,7 +248,7 @@ impl Node {
         state: State,
         latency: f64,
         raft_channel: Receiver<RaftMsg>,
-        commands_channel: Receiver<RaftMsg>,
+        commands_channel: Receiver<CommandMsg>,
     ) -> Self {
         Self {
             state,
@@ -277,9 +278,14 @@ impl Node {
 
                 Some(rpc) = raft_channel.recv() => {
                     election_timeout.as_mut().reset(Instant::now() + dur);
-                    //self.handle_rpc(rpc).await;
-                    // on AppendEntries success or higher‐term RPC:
-                    // reset election_timeout
+                    match rpc {
+                        RaftMsg::AppendEntries(req) => {
+                            // self.handle_append_entries(req).await;
+                        }
+                        RaftMsg::Vote(req) => {
+                        //    self.handle_vote(req).await;
+                        }
+                    }
                 }
 
                 //  election timeout fires → start election

@@ -57,9 +57,11 @@ impl TryFrom<raft_capnp::append_entries_response::Reader<'_>> for AppendEntriesR
 }
 
 pub struct Msg<M, R> {
-    pub msg: M,
-    pub sender: oneshot::Sender<R>,
+    msg: M,
+    sender: oneshot::Sender<R>,
 }
+
+
 
 pub struct VoteRequest {
     term: u64,
@@ -77,12 +79,18 @@ pub struct AppendEntriesRequest {
     leader_commit: u64,
 }
 
+pub enum CommandMsg{
+    Read, Create
+}
+
 pub enum RaftMsg {
     AppendEntries(Msg<AppendEntriesRequest, AppendEntriesResult>),
     Vote(Msg<VoteRequest, VoteResponse>),
 }
 
 impl RaftMsg {
+
+
     pub fn request_append_entries(
         term: u64,
         leader_id: String,
