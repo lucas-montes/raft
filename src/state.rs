@@ -230,12 +230,16 @@ impl Consensus for State {
     fn last_log_info(&self) -> LogsInformation {
         self.hard_state.log_entries.last_log_info()
     }
+    async fn restart_peer(&mut self, peer_index: usize) {
+        self.peers[peer_index].reconnect().await
+    }
 }
 
 #[derive(Debug)]
 pub struct Node {
     state: State,
-    latency: f64,
+    heartbeat_interval: f64,
+    election_timeout: f64,
     raft_channel: Receiver<RaftMsg>,
     commands_channel: Receiver<CommandMsg>,
 }
@@ -243,14 +247,16 @@ pub struct Node {
 impl Node {
     pub fn new(
         state: State,
-        latency: f64,
+        heartbeat_interval: f64,
+        election_timeout: f64,
         raft_channel: Receiver<RaftMsg>,
         commands_channel: Receiver<CommandMsg>,
     ) -> Self {
         Self {
             state,
             raft_channel,
-            latency,
+            heartbeat_interval,
+            election_timeout,
             commands_channel,
         }
     }
@@ -260,9 +266,10 @@ impl Node {
     }
 
     pub async fn run(mut self) {
-        let dur = Duration::from_secs_f64(self.latency);
-        let mut heartbeat_interval = interval(dur);
-        let mut election_timeout = Box::pin(sleep(dur));
+        let heartbeat_dur = Duration::from_secs_f64(self.heartbeat_interval);
+        let election_dur = Duration::from_secs_f64(self.election_timeout);
+        let mut heartbeat_interval = interval(heartbeat_dur);
+        let mut election_timeout = Box::pin(sleep(election_dur));
         let mut raft_channel = self.raft_channel;
         let mut commands_channel = self.commands_channel;
 
@@ -289,7 +296,7 @@ impl Node {
                 }
 
                 Some(rpc) = raft_channel.recv() => {
-                    election_timeout.as_mut().reset(Instant::now() + dur);
+                    election_timeout.as_mut().reset(Instant::now() + election_dur);
                     match rpc {
                         RaftMsg::AppendEntries(req) => {
                             let msg = req.msg;

@@ -120,14 +120,14 @@ async fn manage_append_entries_tasks<S: Consensus>(
         let task_result = match res {
             Ok(response) => response,
             Err(err) => {
-                println!("error in append_entries: {:?}", err);
+                println!("error in manage_append_entries_tasks: {:?}", err);
                 continue;
             }
         };
         let append_entries_response = match task_result {
             Ok(response) => response,
             Err(error) => {
-                // self.peers[error.index].reconnect().await;
+                state.restart_peer(error.index).await;
                 continue;
             }
         };
@@ -230,7 +230,7 @@ async fn manage_vote_tasks<S: Consensus>(
                 votes += r.vote_granted() as u64;
             }
             Err(error) => {
-                // state.peers()[error.index].reconnect().await;
+                state.restart_peer(error.index).await;
             }
         }
     }

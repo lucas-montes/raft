@@ -36,11 +36,12 @@ async fn main() {
 
     tokio::task::LocalSet::new()
         .run_until(async move {
-            let latency = random_range(1.0..2.9);
+            let heartbeat_interval = random_range(1.0..2.9);
+            let election_timeout = random_range(3.0..6.0);
             let state = State::new(NodeId::new(cli.addr.clone()));
             let (rtx, rrx) = tokio::sync::mpsc::channel(100);
             let (ctx, crx) = tokio::sync::mpsc::channel(100);
-            let mut service = Node::new(state, latency, rrx, crx);
+            let mut service = Node::new(state, heartbeat_interval, election_timeout, rrx, crx);
 
             let server = Server::new(rtx, ctx);
 

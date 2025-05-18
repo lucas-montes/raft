@@ -13,6 +13,7 @@ pub enum AppendEntriesResult {
 }
 
 pub trait Consensus {
+    async fn restart_peer(&mut self, peer_index: usize); //TODO: doesnt belong here
     fn current_term(&self) -> u64;
     fn commit_index(&self) -> u64;
     fn update_commit_index(&mut self, commit_index: u64);
