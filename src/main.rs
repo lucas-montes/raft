@@ -27,21 +27,24 @@ pub struct Cli {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    //     let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log");
+    // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
                 .json()
                 // .with_writer(non_blocking)
-                .log_internal_errors(true)
-                .with_file(true)
-                .with_line_number(true)
-                .with_thread_ids(true)
-                .with_thread_names(true)
-                .with_current_span(true)
-                .with_span_events(FmtSpan::FULL)
-                .with_span_list(true)
-                .with_target(true),
-        ).init();
+                .log_internal_errors(true), // .with_file(true)
+                                            // .with_line_number(true)
+                                            // .with_thread_ids(true)
+                                            // .with_thread_names(true)
+                                            // .with_current_span(true)
+                                            // .with_span_events(FmtSpan::FULL)
+                                            // .with_span_list(true)
+                                            // .with_target(true),
+        )
+        .init();
 
     let cli = Cli::parse();
 

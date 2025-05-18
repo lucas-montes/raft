@@ -112,7 +112,7 @@ pub trait Consensus {
         };
     }
 
-    fn count_votes(&mut self, votes: u64){
+    fn count_votes(&mut self, votes: u64) {
         //NOTE: we add one to the number of nodes to count ourself
         let num_nodes = self.peers().len() + 1;
         let has_majority = votes > num_nodes.div_euclid(2) as u64;

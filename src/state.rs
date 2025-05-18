@@ -47,7 +47,7 @@ impl Peer {
     }
 
     async fn new(addr: SocketAddr) -> Self {
-        let client = Self::connect(&addr).await;
+        let client = Self::connect(addr).await;
         Self {
             id: NodeId(addr),
             addr,
@@ -56,24 +56,52 @@ impl Peer {
     }
 
     pub async fn reconnect(&mut self) {
-        self.client = Self::connect(&self.addr).await;
+        self.client = Self::connect(self.addr).await;
     }
 
-    async fn connect(addr: &SocketAddr) -> raft::Client {
-        let mut counter = 0;
-        tracing::info!("trying to connect");
-        loop {
-            match create_client(addr).await {
-                Ok(client) => {
-                    tracing::info!("connected");
-                    break client;
-                }
-                Err(err) => {
-                    counter += 1;
-                    tokio::time::sleep(Duration::from_secs(counter)).await;
+    async fn connect(addr: SocketAddr) -> raft::Client {
+        tokio::task::spawn_local(async move {
+            let mut counter = 0;
+            tracing::info!("trying to connect");
+            loop {
+                match create_client(&addr).await {
+                    Ok(client) => {
+                        tracing::info!("connected");
+                        break client;
+                    }
+                    Err(err) => {
+                        counter += 1;
+                        if counter % 5 == 0 {
+                            tracing::error!(
+                                attempt = counter,
+                                peer = addr.to_string(),
+                                "failed to connect to peer"
+                            );
+                        }
+                        tokio::time::sleep(Duration::from_millis(counter * 10)).await;
+                    }
                 }
             }
-        }
+        })
+        .await
+        .expect("connecting to peer failed")
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct Peers(Vec<Peer>);
+
+impl Deref for Peers {
+    type Target = Vec<Peer>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Peers {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -132,23 +160,6 @@ pub struct SoftState {
 pub struct LeaderState {
     match_index: Vec<(NodeId, u64)>,
     next_index: Vec<(NodeId, u64)>,
-}
-
-#[derive(Default, Debug, Clone)]
-pub struct Peers(Vec<Peer>);
-
-impl Deref for Peers {
-    type Target = Vec<Peer>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Peers {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
 }
 
 #[derive(Default, Debug)]
@@ -299,7 +310,7 @@ impl Node {
 
                 Some(rpc) = raft_channel.recv() => {
                     election_timeout.as_mut().reset(Instant::now() + election_dur);
-                    tracing::info!("electinos time resest {:?} ecause of rpc: {:?}", election_timeout.deadline(), rpc);
+                    tracing::info!("electinos time resest {:?} ecause of rpc", election_timeout.deadline().elapsed());
                     match rpc {
                         RaftMsg::AppendEntries(req) => {
                             let msg = req.msg;
@@ -332,12 +343,14 @@ impl Node {
                     }
                 }
 
+                //TODO: maybe the following functions could be driven by the role and a trait
+
                 //  election timeout fires → start election
                 _ = &mut election_timeout, if self.state.role != Role::Leader => {
+                    election_timeout.as_mut().reset(Instant::now() + election_dur);
                     tracing::info!("electinos time");
                     self.state.become_candidate();
                     vote(&mut self.state).await;
-                    election_timeout.as_mut().reset(Instant::now() + election_dur);
                 }
 
                 //  heartbeat tick → send heartbeats if leader
