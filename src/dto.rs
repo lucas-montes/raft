@@ -2,7 +2,11 @@ use std::net::SocketAddr;
 
 use tokio::sync::oneshot::{self, Receiver};
 
-use crate::{consensus::AppendEntriesResult, raft_capnp::{self, raft}, storage::LogEntry};
+use crate::{
+    consensus::AppendEntriesResult,
+    raft_capnp::{self},
+    storage::LogEntry,
+};
 
 pub struct VoteResponse {
     term: u64,
@@ -63,7 +67,6 @@ pub struct Msg<M, R> {
     pub sender: oneshot::Sender<R>,
 }
 
-
 pub struct VoteRequest {
     term: u64,
     candidate_id: String,
@@ -94,11 +97,10 @@ pub struct AppendEntriesRequest {
     pub leader_commit: u64,
 }
 
-
-pub enum CommandMsg{
+pub enum CommandMsg {
     GetLeader(Msg<(), Option<SocketAddr>>),
     Read(Msg<AppendEntriesRequest, AppendEntriesResult>),
-    Modify(Msg<AppendEntriesRequest, AppendEntriesResult>)
+    Modify(Msg<AppendEntriesRequest, AppendEntriesResult>),
 }
 
 impl CommandMsg {
@@ -118,8 +120,6 @@ pub enum RaftMsg {
 }
 
 impl RaftMsg {
-
-
     pub fn request_append_entries(
         term: u64,
         leader_id: String,

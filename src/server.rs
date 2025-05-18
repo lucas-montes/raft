@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, rc::Rc};
+use std::net::SocketAddr;
 
 use capnp::capability::Promise;
 use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
@@ -6,7 +6,11 @@ use futures::AsyncReadExt;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    client::{create_client, create_client_com}, consensus::AppendEntriesResult, dto::{CommandMsg, RaftMsg}, raft_capnp::{command, raft}, state::{Role, State}, storage::LogEntry
+    client::create_client_com,
+    consensus::AppendEntriesResult,
+    dto::{CommandMsg, RaftMsg},
+    raft_capnp::{command, raft},
+    storage::LogEntry,
 };
 
 #[derive(Debug, Clone)]
@@ -56,11 +60,10 @@ impl command::Server for Server {
         Promise::from_future(async move {
             let (msg, rx) = CommandMsg::get_leader();
             channel.send(msg).await.expect("msg not sent");
-            if let Some(leader) = rx.await.expect("msg not received"){
+            if let Some(leader) = rx.await.expect("msg not received") {
                 let client = create_client_com(&leader).await.expect("msg not received");
-                 results
-                .get()
-                .set_leader(client);};
+                results.get().set_leader(client);
+            };
             Ok(())
         })
     }

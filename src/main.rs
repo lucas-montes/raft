@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, rc::Rc, time::Duration};
+use std::net::SocketAddr;
 
 use clap::Parser;
 use rand::random_range;
@@ -15,7 +15,6 @@ mod dto;
 mod server;
 mod state;
 mod storage;
-
 
 #[derive(Debug, Parser)]
 pub struct Cli {

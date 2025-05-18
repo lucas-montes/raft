@@ -13,7 +13,10 @@ use tokio::{
 };
 
 use crate::{
-    client::{append_entries, create_client, vote}, consensus::Consensus, dto::{CommandMsg, RaftMsg}, raft_capnp::raft,
+    client::{append_entries, create_client, vote},
+    consensus::Consensus,
+    dto::{CommandMsg, RaftMsg},
+    raft_capnp::raft,
     storage::{LogEntries, LogsInformation},
 };
 
@@ -187,7 +190,7 @@ impl Consensus for State {
         self.hard_state.voted_for = Some(self.id);
         // self.soft_state.commit_index = 0;
         self.leader = None;
-            //     self.heartbeat_latency = random_range(1.0..2.9);
+        //     self.heartbeat_latency = random_range(1.0..2.9);
     }
 
     fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
@@ -205,9 +208,7 @@ impl Consensus for State {
     }
 
     fn leader(&self) -> Option<SocketAddr> {
-        self
-            .leader
-            .as_ref().map(|node| node.addr())
+        self.leader.as_ref().map(|node| node.addr())
     }
 
     fn vote_for(&mut self, node: NodeId) {
@@ -258,7 +259,6 @@ impl Node {
         self.state.peers.push(Peer::new(addr).await);
     }
 
-
     pub async fn run(mut self) {
         let dur = Duration::from_secs_f64(self.latency);
         let mut heartbeat_interval = interval(dur);
@@ -275,7 +275,7 @@ impl Node {
                             let resp = self.state.leader();
                             let sender = req.sender;
                             if let Err(_) = sender.send(resp){
-                                println!("Failed to send response");
+                                println!("Failed to send response in channel for get leader");
                             }
                         }
                         CommandMsg::Read(req) => {
@@ -303,7 +303,7 @@ impl Node {
                                 msg.entries,
                             );
                             if let Err(_) = sender.send(resp){
-                                println!("Failed to send response");
+                                println!("Failed to send response in channel for append entries");
                             }
                         }
                         RaftMsg::Vote(req) => {
@@ -316,7 +316,7 @@ impl Node {
                                 msg.last_log_term(),
                             );
                             if let Err(_) = sender.send(resp){
-                                println!("Failed to send response");
+                                println!("Failed to send response in channel for vote");
                             }
                         }
                     }

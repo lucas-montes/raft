@@ -1,13 +1,13 @@
-use capnp_rpc::{new_future_client, rpc_twoparty_capnp, twoparty, RpcSystem};
+use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
-use std::{fmt::Debug, marker::PhantomData, net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 use tokio::task::JoinSet;
 
 use crate::{
     consensus::Consensus,
     dto::{AppendEntriesResponse, VoteResponse},
-    raft_capnp::{self, command, raft},
-    state::{Peer, Peers}, storage::LogEntry,
+    raft_capnp::{command, raft},
+    storage::LogEntry,
 };
 
 struct RequestError {
@@ -21,7 +21,8 @@ pub async fn append_entries<S: Consensus>(state: &mut S, entries: &[LogEntry]) {
 }
 
 async fn prepare_append_entries_tasks<S: Consensus>(
-    state: &mut S, entries: &[LogEntry]
+    state: &mut S,
+    entries: &[LogEntry],
 ) -> JoinSet<Result<AppendEntriesResponse, RequestError>> {
     let mut tasks = JoinSet::new();
     let current_term = state.current_term();
@@ -205,8 +206,12 @@ async fn prepare_vote_tasks<S: Consensus>(
         let mut request = client.request_vote_request();
         request.get().set_term(current_term);
         request.get().set_candidate_id(&addr);
-        request.get().set_last_log_index(last_log_info.last_log_index());
-        request.get().set_last_log_term(last_log_info.last_log_term());
+        request
+            .get()
+            .set_last_log_index(last_log_info.last_log_index());
+        request
+            .get()
+            .set_last_log_term(last_log_info.last_log_term());
 
         tasks.spawn_local(send_vote(request, index));
     }
@@ -257,8 +262,9 @@ pub async fn create_client(addr: &SocketAddr) -> Result<raft::Client, Box<dyn st
     Ok(client)
 }
 
-
-pub async fn create_client_com(addr: &SocketAddr) -> Result<command::Client, Box<dyn std::error::Error>> {
+pub async fn create_client_com(
+    addr: &SocketAddr,
+) -> Result<command::Client, Box<dyn std::error::Error>> {
     let stream = tokio::net::TcpStream::connect(addr).await?;
     stream.set_nodelay(true)?;
     let (reader, writer) = tokio_util::compat::TokioAsyncReadCompatExt::compat(stream).split();

@@ -2,7 +2,7 @@ use std::{net::SocketAddr, str::FromStr};
 
 use crate::{
     dto::VoteResponse,
-    state::{NodeId, Peer, Peers, Role},
+    state::{NodeId, Peers},
     storage::{LogEntries, LogEntry, LogsInformation},
 };
 
@@ -51,13 +51,13 @@ pub trait Consensus {
             //failing node so it can send the log entries to make him update
             let result = self.last_log_info();
             return AppendEntriesResult::LogEntriesMismatch {
-                last_index:result.last_log_index(),
+                last_index: result.last_log_index(),
                 last_term: result.last_log_term(),
             };
         }
 
         // //3 and 4
-       let result = current_entries.merge(entries);
+        let result = current_entries.merge(entries);
 
         //5
         if leader_commit > self.commit_index() {
@@ -88,15 +88,14 @@ pub trait Consensus {
         }
 
         //NOTE: use something better for the id of the server
-        let condidate_id_matches = self.voted_for().is_none_or(|addr| {
-            addr.eq(&candidate)
-        });
+        let condidate_id_matches = self.voted_for().is_none_or(|addr| addr.eq(&candidate));
 
         let last_log_info = self.last_log_info();
 
         //NOTE: in the paper we find it has "at least up to date" and in a presentation we find this formula
         let logs_uptodate = last_log_term > last_log_info.last_log_term()
-            || (last_log_index >= last_log_info.last_log_index() && last_log_term == last_log_info.last_log_term());
+            || (last_log_index >= last_log_info.last_log_index()
+                && last_log_term == last_log_info.last_log_term());
 
         //TODO: avoid match statement
         match condidate_id_matches && logs_uptodate {
@@ -111,17 +110,16 @@ pub trait Consensus {
         };
     }
 
-    fn last_log_info(&self) ->LogsInformation;
+    fn last_log_info(&self) -> LogsInformation;
     fn peers(&self) -> &Peers;
     fn leader(&self) -> Option<SocketAddr>;
-    fn log_entries(&mut self) -> &mut LogEntries;//TODO: should communicate with channels probably
+    fn log_entries(&mut self) -> &mut LogEntries; //TODO: should communicate with channels probably
     fn vote_for(&mut self, node: NodeId);
     fn voted_for(&self) -> Option<&NodeId>;
     fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64);
     fn become_candidate(&mut self);
     fn become_leader(&mut self);
     fn id(&self) -> &NodeId;
-
 }
 
 // #[cfg(test)]

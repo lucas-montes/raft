@@ -44,7 +44,7 @@ impl Ord for LogEntry {
     }
 }
 
-pub struct LogsInformation{
+pub struct LogsInformation {
     last_log_index: u64,
     last_log_term: u64,
 }
@@ -64,11 +64,11 @@ impl LogEntries {
     pub fn last_log_info(&self) -> LogsInformation {
         let last_entry = self.0.last();
         match last_entry {
-            Some(entry) => LogsInformation{
+            Some(entry) => LogsInformation {
                 last_log_index: entry.index,
                 last_log_term: entry.term,
             },
-            None => LogsInformation{
+            None => LogsInformation {
                 last_log_index: 0,
                 last_log_term: 0,
             },
@@ -77,7 +77,7 @@ impl LogEntries {
 
     /// We merge the new entries with the current ones. We assume that each index will always be correct and match
     /// the exact index of the log entry. We also assume that the new entries are always in order.
-    pub fn merge(&mut self, new_entries: Vec<LogEntry>)->LogsInformation {
+    pub fn merge(&mut self, new_entries: Vec<LogEntry>) -> LogsInformation {
         for entry in new_entries {
             let idx = entry.index as usize;
             match self.get(idx) {
@@ -100,7 +100,11 @@ impl LogEntries {
     //     self.0.push(LogEntry::new(idx, term, command))
     // }
 
-    pub fn previous_log_entry_is_up_to_date(&self, prev_log_index: usize, prev_log_term: u64) -> bool {
+    pub fn previous_log_entry_is_up_to_date(
+        &self,
+        prev_log_index: usize,
+        prev_log_term: u64,
+    ) -> bool {
         if prev_log_index + self.len() == 0 {
             return true;
         }
