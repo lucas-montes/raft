@@ -3,7 +3,7 @@ use std::{net::SocketAddr, str::FromStr};
 use crate::{
     dto::VoteResponse,
     state::{NodeId, Peer, Peers, Role},
-    storage::LogEntry,
+    storage::{LogEntries, LogEntry, LogsInformation},
 };
 
 pub enum AppendEntriesResult {
@@ -29,7 +29,7 @@ pub trait Consensus {
         prev_log_index: usize,
         prev_log_term: u64,
         leader_commit: u64,
-        entries: &Vec<LogEntry>,
+        entries: Vec<LogEntry>,
     ) -> AppendEntriesResult {
         //1
         if term < self.current_term() {
@@ -43,27 +43,25 @@ pub trait Consensus {
             term,
         );
 
-        let current_entries = &mut self.log_entries();
+        let current_entries = &mut *self.log_entries();
 
-        // //2become_follower
-        // if !current_entries.previous_log_entry_is_up_to_date(prev_log_index, prev_log_term) {
-        //     //TODO: when we return this error, the leader needs to know the last index/term of the
-        //     //failing node so it can send the log entries to make him update
-        //     let (last_term, last_index) = self.last_log_info();
-        //     return AppendEntriesResult::LogEntriesMismatch {
-        //         last_index,
-        //         last_term,
-        //     };
-        // }
+        // //2
+        if !current_entries.previous_log_entry_is_up_to_date(prev_log_index, prev_log_term) {
+            //TODO: when we return this error, the leader needs to know the last index/term of the
+            //failing node so it can send the log entries to make him update
+            let result = self.last_log_info();
+            return AppendEntriesResult::LogEntriesMismatch {
+                last_index:result.last_log_index(),
+                last_term: result.last_log_term(),
+            };
+        }
 
         // //3 and 4
-        // current_entries.merge(entries);
-
-        let (_, last_index) = self.last_log_info();
+       let result = current_entries.merge(entries);
 
         //5
         if leader_commit > self.commit_index() {
-            self.update_commit_index(std::cmp::min(leader_commit, last_index));
+            self.update_commit_index(std::cmp::min(leader_commit, result.last_log_index()));
         }
 
         AppendEntriesResult::Ok
@@ -80,31 +78,30 @@ pub trait Consensus {
             return VoteResponse::not_granted(self.current_term());
         }
 
+        let candidate = NodeId::new(
+            SocketAddr::from_str(candidate_id)
+                .expect("why candidate_id isnt a correct socketaddrs?"),
+        );
+
         if term > self.current_term() {
             self.become_follower(None, term);
         }
 
         //NOTE: use something better for the id of the server
         let condidate_id_matches = self.voted_for().is_none_or(|addr| {
-            addr.eq(&NodeId::new(
-                SocketAddr::from_str(candidate_id)
-                    .expect("why candidate_id isnt a correct socketaddrs?"),
-            ))
+            addr.eq(&candidate)
         });
 
-        let (last_term, last_index) = self.last_log_info();
+        let last_log_info = self.last_log_info();
 
         //NOTE: in the paper we find it has "at least up to date" and in a presentation we find this formula
-        let logs_uptodate = last_log_term > last_term
-            || (last_log_index >= last_index && last_log_term == last_term);
+        let logs_uptodate = last_log_term > last_log_info.last_log_term()
+            || (last_log_index >= last_log_info.last_log_index() && last_log_term == last_log_info.last_log_term());
 
         //TODO: avoid match statement
         match condidate_id_matches && logs_uptodate {
             true => {
-                // self.voted_for = Some(
-                //     SocketAddr::from_str(candidate_id)
-                //         .expect("why candidate_id isnt a correct socketaddrs?"),
-                // );
+                self.vote_for(candidate);
 
                 return VoteResponse::granted(self.current_term());
             }
@@ -114,52 +111,17 @@ pub trait Consensus {
         };
     }
 
-    fn last_log_info(&self) -> (u64, u64);
+    fn last_log_info(&self) ->LogsInformation;
     fn peers(&self) -> &Peers;
     fn leader(&self) -> Option<SocketAddr>;
-    fn log_entries(&self) -> &Vec<LogEntry>;
+    fn log_entries(&mut self) -> &mut LogEntries;//TODO: should communicate with channels probably
     fn vote_for(&mut self, node: NodeId);
     fn voted_for(&self) -> Option<&NodeId>;
     fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64);
     fn become_candidate(&mut self);
     fn become_leader(&mut self);
+    fn id(&self) -> &NodeId;
 
-    // fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
-    //     self.role = Role::Follower;
-    //     self.current_term = new_term;
-    //     self.voted_for = None;
-    //     self.leader = leader_id;
-    // }
-
-    // fn become_candidate(&mut self) {
-    //     println!("elections noooow");
-    //     self.role = Role::Candidate;
-    //     self.current_term += 1;
-    //     self.voted_for = Some(self.addr);
-    //     self.heartbeat_latency = random_range(1.0..2.9);
-    //     self.last_heartbeat = Some(Instant::now());
-    // }
-
-    // fn become_leader(&mut self) {
-    //     println!("im the leader now");
-    //     // let last_log = self.log_entries.last().map(|l| l.index).unwrap_or_default();
-    //     self.role = Role::Leader;
-    //     self.voted_for = None;
-    // }
-
-    // fn check_election(&mut self, election_timeout: Duration) {
-    //     if self
-    //         .last_heartbeat
-    //         .is_none_or(|t| t.elapsed() >= election_timeout)
-    //         && self.role == Role::Follower
-    //     {
-    //         self.become_candidate()
-    //     }
-    // }
-    // fn update_heartbeat(&mut self) {
-    //     println!("beating");
-    //     self.last_heartbeat = Some(Instant::now());
-    // }
 }
 
 // #[cfg(test)]

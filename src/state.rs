@@ -14,7 +14,7 @@ use tokio::{
 
 use crate::{
     client::{append_entries, create_client, vote}, consensus::Consensus, dto::{CommandMsg, RaftMsg}, raft_capnp::raft,
-    storage::LogEntries,
+    storage::{LogEntries, LogsInformation},
 };
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -164,17 +164,12 @@ impl State {
             ..Default::default()
         }
     }
-
-    pub fn addr(&self) -> SocketAddr {
-        self.id.0
-    }
-
-    pub fn role(&self) -> Role {
-        self.role
-    }
 }
 
 impl Consensus for State {
+    fn id(&self) -> &NodeId {
+        &self.id
+    }
     fn peers(&self) -> &Peers {
         &self.peers
     }
@@ -182,9 +177,8 @@ impl Consensus for State {
         self.soft_state.commit_index = commit_index;
     }
 
-    fn log_entries(&self) -> &Vec<crate::storage::LogEntry> {
-        // &self.hard_state.log_entries.0
-        todo!()
+    fn log_entries(&mut self) -> &mut LogEntries {
+        &mut self.hard_state.log_entries
     }
 
     fn become_candidate(&mut self) {
@@ -193,6 +187,7 @@ impl Consensus for State {
         self.hard_state.voted_for = Some(self.id);
         // self.soft_state.commit_index = 0;
         self.leader = None;
+            //     self.heartbeat_latency = random_range(1.0..2.9);
     }
 
     fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
@@ -231,7 +226,7 @@ impl Consensus for State {
         self.soft_state.commit_index
     }
 
-    fn last_log_info(&self) -> (u64, u64) {
+    fn last_log_info(&self) -> LogsInformation {
         self.hard_state.log_entries.last_log_info()
     }
 }
@@ -278,7 +273,10 @@ impl Node {
                     match rpc {
                         CommandMsg::GetLeader(req) => {
                             let resp = self.state.leader();
-                            req.send_response(resp);
+                            let sender = req.sender;
+                            if let Err(_) = sender.send(resp){
+                                println!("Failed to send response");
+                            }
                         }
                         CommandMsg::Read(req) => {
                             // Handle read command
@@ -294,26 +292,32 @@ impl Node {
                     election_timeout.as_mut().reset(Instant::now() + dur);
                     match rpc {
                         RaftMsg::AppendEntries(req) => {
-                            let msg = req.mesage();
+                            let msg = req.msg;
+                            let sender = req.sender;
                             let resp = self.state.handle_append_entries(
-                                msg.term(),
-                                msg.leader_id(),
-                                msg.prev_log_index() as usize,
-                                msg.prev_log_term(),
-                                msg.leader_commit(),
-                                msg.entries(),
+                                msg.term,
+                                &msg.leader_id,
+                                msg.prev_log_index as usize,
+                                msg.prev_log_term,
+                                msg.leader_commit,
+                                msg.entries,
                             );
-                            req.send_response(resp);
+                            if let Err(_) = sender.send(resp){
+                                println!("Failed to send response");
+                            }
                         }
                         RaftMsg::Vote(req) => {
-                            let msg = req.mesage();
+                            let msg = req.msg;
+                            let sender = req.sender;
                             let resp = self.state.handle_request_vote(
                                 msg.term(),
                                 msg.candidate_id(),
                                 msg.last_log_index(),
                                 msg.last_log_term(),
                             );
-                            req.send_response(resp);
+                            if let Err(_) = sender.send(resp){
+                                println!("Failed to send response");
+                            }
                         }
                     }
                 }
@@ -327,7 +331,7 @@ impl Node {
 
                 //  heartbeat tick → send heartbeats if leader
                 _ = heartbeat_interval.tick(), if self.state.role == Role::Leader => {
-                    append_entries(&mut self.state, None).await;
+                    append_entries(&mut self.state, &[]).await;
                 }
             }
         }

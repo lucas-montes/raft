@@ -59,22 +59,9 @@ impl TryFrom<raft_capnp::append_entries_response::Reader<'_>> for AppendEntriesR
 }
 
 pub struct Msg<M, R> {
-    msg: M,
-    sender: oneshot::Sender<R>,
+    pub msg: M,
+    pub sender: oneshot::Sender<R>,
 }
-
-impl<M, R> Msg<M, R> {
-    pub fn mesage(&self) -> &M {
-        &self.msg
-    }
-
-    pub fn send_response(self, response: R) {
-        if let Err(_) = self.sender.send(response){
-            println!("Failed to send response");
-        }
-    }
-}
-
 
 
 pub struct VoteRequest {
@@ -99,34 +86,14 @@ impl VoteRequest {
 }
 
 pub struct AppendEntriesRequest {
-    term: u64,
-    leader_id: String,
-    prev_log_index: u64,
-    prev_log_term: u64,
-    entries: Vec<LogEntry>,
-    leader_commit: u64,
+    pub term: u64,
+    pub leader_id: String,
+    pub prev_log_index: u64,
+    pub prev_log_term: u64,
+    pub entries: Vec<LogEntry>,
+    pub leader_commit: u64,
 }
 
-impl AppendEntriesRequest {
-pub fn term(&self) -> u64 {
-        self.term
-    }
-    pub fn leader_id(&self) -> &str {
-        &self.leader_id
-    }
-    pub fn prev_log_index(&self) -> u64 {
-        self.prev_log_index
-    }
-    pub fn prev_log_term(&self) -> u64 {
-        self.prev_log_term
-    }
-    pub fn entries(&self) -> &Vec<LogEntry> {
-        &self.entries
-    }
-    pub fn leader_commit(&self) -> u64 {
-        self.leader_commit
-    }
-}
 
 pub enum CommandMsg{
     GetLeader(Msg<(), Option<SocketAddr>>),

@@ -86,7 +86,7 @@ impl raft::Server for Server {
                     .expect("error getting command as string"),
             ));
         }
-        let leader = pry!(request.get_leader());
+        let leader = pry!(request.get_leader_id());
 
         let (msg, rx) = RaftMsg::request_append_entries(
             request.get_term(),

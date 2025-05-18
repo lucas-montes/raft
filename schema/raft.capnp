@@ -48,7 +48,7 @@ interface Raft {
 
 struct AppendEntriesRequest {
   term @0 :UInt64;
-  leader @1 :Peer;
+  leaderId @1 :Text;
   prevLogIndex @2:UInt64;
   prevLogTerm @3 :UInt64;
   entries @4 :List(LogEntry);

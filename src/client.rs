@@ -1,4 +1,4 @@
-use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
+use capnp_rpc::{new_future_client, rpc_twoparty_capnp, twoparty, RpcSystem};
 use futures::AsyncReadExt;
 use std::{fmt::Debug, marker::PhantomData, net::SocketAddr, time::Duration};
 use tokio::task::JoinSet;
@@ -15,21 +15,23 @@ struct RequestError {
     error: capnp::Error,
 }
 
-pub async fn append_entries<S: Consensus>(state: &mut S, entries: Option<Vec<LogEntry>>) {
+pub async fn append_entries<S: Consensus>(state: &mut S, entries: &[LogEntry]) {
     let tasks = prepare_append_entries_tasks(state, entries).await;
     manage_append_entries_tasks(state, tasks).await;
 }
 
 async fn prepare_append_entries_tasks<S: Consensus>(
-    state: &mut S, entries: Option<Vec<LogEntry>>
+    state: &mut S, entries: &[LogEntry]
 ) -> JoinSet<Result<AppendEntriesResponse, RequestError>> {
     let mut tasks = JoinSet::new();
     let current_term = state.current_term();
-    // let node_addr = self.state.addr().to_string();
+    let addr = state.id().addr().to_string();
     let commit_index = state.commit_index();
-    let (last_term, last_index) = state.last_log_info();
+    let last_log_info = state.last_log_info();
 
     println!("sending heartbeats");
+
+    // let mut m = capnp::message::Builder::new_default();
 
     for (index, peer) in state.peers().iter().enumerate() {
         let client = peer.client();
@@ -37,19 +39,18 @@ async fn prepare_append_entries_tasks<S: Consensus>(
         let mut request = client.append_entries_request();
 
         let mut data = request.get().init_request();
-        // // let mut leader = data.reborrow().init_leader();
-
         data.set_term(current_term);
-
-        // leader.set_id("value");
-        // leader.set_address("value");
-        // // leader.set_client(value);
-        // data.set_leader(leader.into_reader());
-
-        // data.set_prev_log_index(last_index);
-        // data.set_prev_log_term(last_term);
-        // data.set_leader_commit(commit_index);
-        // data.init_entries(0);
+        data.set_leader_id(&addr);
+        data.set_prev_log_index(last_log_info.last_log_index());
+        data.set_prev_log_term(last_log_info.last_log_term());
+        data.set_leader_commit(commit_index);
+        let mut entries_client = data.init_entries(entries.len() as u32);
+        for (i, entry) in entries.iter().enumerate() {
+            let mut entry_data = entries_client.reborrow().get(i as u32);
+            entry_data.set_index(entry.index());
+            entry_data.set_term(entry.term());
+            entry_data.set_command(&entry.command());
+        }
 
         tasks.spawn_local(send_append_entries(request, index));
     }
@@ -132,7 +133,7 @@ async fn manage_append_entries_tasks<S: Consensus>(
 
         if let AppendEntriesResponse::Err(term) = append_entries_response {
             //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
-            // self.become_follower(self.node.addr(), term);
+            state.become_follower(None, term);
             println!("im a follower now so i do not send more hearbeats");
             break;
         };
@@ -193,8 +194,8 @@ async fn prepare_vote_tasks<S: Consensus>(
 ) -> JoinSet<Result<VoteResponse, RequestError>> {
     let mut tasks = JoinSet::new();
     let current_term = state.current_term();
-    // let addr = self.node.addr()();
-    let (last_term, last_index) = state.last_log_info();
+    let addr = state.id().addr().to_string();
+    let last_log_info = state.last_log_info();
 
     //TODO: probably should be better to use a select and hook the server to listen for the heartbeat
     // https://docs.rs/tokio/latest/tokio/task/struct.JoinSet.html#examples
@@ -203,9 +204,9 @@ async fn prepare_vote_tasks<S: Consensus>(
 
         let mut request = client.request_vote_request();
         request.get().set_term(current_term);
-        // request.get().set_candidate_id(&addr);
-        request.get().set_last_log_index(last_index);
-        request.get().set_last_log_term(last_term);
+        request.get().set_candidate_id(&addr);
+        request.get().set_last_log_index(last_log_info.last_log_index());
+        request.get().set_last_log_term(last_log_info.last_log_term());
 
         tasks.spawn_local(send_vote(request, index));
     }
