@@ -6,11 +6,7 @@ use futures::AsyncReadExt;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    consensus::AppendEntriesResult,
-    dto::{CommandMsg, RaftMsg},
-    raft_capnp::{command, raft},
-    state::{Role, State},
-    storage::LogEntry,
+    client::{create_client, create_client_com}, consensus::AppendEntriesResult, dto::{CommandMsg, RaftMsg}, raft_capnp::{command, raft}, state::{Role, State}, storage::LogEntry
 };
 
 #[derive(Debug, Clone)]
@@ -56,14 +52,17 @@ impl command::Server for Server {
         params: command::StartTransactionParams,
         mut results: command::StartTransactionResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
-        // if self.state.role() == Role::Leader {
-        //     results
-        //         .get()
-        //         .set_leader(capnp_rpc::new_client(self.clone()));
-        // } else {
-        //     results.get().set_leader(peer.client.clone());
-        // }
-        Promise::ok(())
+        let channel = self.commands_channel.clone();
+        Promise::from_future(async move {
+            let (msg, rx) = CommandMsg::get_leader();
+            channel.send(msg).await.expect("msg not sent");
+            if let Some(leader) = rx.await.expect("msg not received"){
+                let client = create_client_com(&leader).await.expect("msg not received");
+                 results
+                .get()
+                .set_leader(client);};
+            Ok(())
+        })
     }
 }
 

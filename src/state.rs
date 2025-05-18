@@ -13,7 +13,7 @@ use tokio::{
 };
 
 use crate::{
-    client::create_client, consensus::Consensus, dto::{CommandMsg, RaftMsg}, raft_capnp::raft,
+    client::{append_entries, create_client, vote}, consensus::Consensus, dto::{CommandMsg, RaftMsg}, raft_capnp::raft,
     storage::LogEntries,
 };
 
@@ -210,8 +210,9 @@ impl Consensus for State {
     }
 
     fn leader(&self) -> Option<SocketAddr> {
-        // self.leader.map(|id| id.addr())
-        todo!()
+        self
+            .leader
+            .as_ref().map(|node| node.addr())
     }
 
     fn vote_for(&mut self, node: NodeId) {
@@ -262,7 +263,8 @@ impl Node {
         self.state.peers.push(Peer::new(addr).await);
     }
 
-    pub async fn run(self) {
+
+    pub async fn run(mut self) {
         let dur = Duration::from_secs_f64(self.latency);
         let mut heartbeat_interval = interval(dur);
         let mut election_timeout = Box::pin(sleep(dur));
@@ -273,6 +275,18 @@ impl Node {
             tokio::select! {
                 //  Incoming RPCs from external users
                 Some(rpc) = commands_channel.recv() => {
+                    match rpc {
+                        CommandMsg::GetLeader(req) => {
+                            let resp = self.state.leader();
+                            req.send_response(resp);
+                        }
+                        CommandMsg::Read(req) => {
+                            // Handle read command
+                        }
+                        CommandMsg::Modify(req) => {
+                            // Handle modify command
+                        }
+                    }
 
                 }
 
@@ -280,24 +294,40 @@ impl Node {
                     election_timeout.as_mut().reset(Instant::now() + dur);
                     match rpc {
                         RaftMsg::AppendEntries(req) => {
-                            // self.handle_append_entries(req).await;
+                            let msg = req.mesage();
+                            let resp = self.state.handle_append_entries(
+                                msg.term(),
+                                msg.leader_id(),
+                                msg.prev_log_index() as usize,
+                                msg.prev_log_term(),
+                                msg.leader_commit(),
+                                msg.entries(),
+                            );
+                            req.send_response(resp);
                         }
                         RaftMsg::Vote(req) => {
-                        //    self.handle_vote(req).await;
+                            let msg = req.mesage();
+                            let resp = self.state.handle_request_vote(
+                                msg.term(),
+                                msg.candidate_id(),
+                                msg.last_log_index(),
+                                msg.last_log_term(),
+                            );
+                            req.send_response(resp);
                         }
                     }
                 }
 
                 //  election timeout fires → start election
                 _ = &mut election_timeout, if self.state.role != Role::Leader => {
-                    // self.become_candidate().await;
-                    // Clear votes, increment term, vote for self, send RequestVotes...
+                    self.state.become_candidate();
+                    vote(&mut self.state).await;
 
                 }
 
                 //  heartbeat tick → send heartbeats if leader
                 _ = heartbeat_interval.tick(), if self.state.role == Role::Leader => {
-                    //self.send_heartbeats().await;
+                    append_entries(&mut self.state, None).await;
                 }
             }
         }

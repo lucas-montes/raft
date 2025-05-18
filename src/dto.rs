@@ -1,6 +1,8 @@
+use std::net::SocketAddr;
+
 use tokio::sync::oneshot::{self, Receiver};
 
-use crate::{consensus::AppendEntriesResult, raft_capnp, storage::LogEntry};
+use crate::{consensus::AppendEntriesResult, raft_capnp::{self, raft}, storage::LogEntry};
 
 pub struct VoteResponse {
     term: u64,
@@ -61,6 +63,18 @@ pub struct Msg<M, R> {
     sender: oneshot::Sender<R>,
 }
 
+impl<M, R> Msg<M, R> {
+    pub fn mesage(&self) -> &M {
+        &self.msg
+    }
+
+    pub fn send_response(self, response: R) {
+        if let Err(_) = self.sender.send(response){
+            println!("Failed to send response");
+        }
+    }
+}
+
 
 
 pub struct VoteRequest {
@@ -68,6 +82,20 @@ pub struct VoteRequest {
     candidate_id: String,
     last_log_index: u64,
     last_log_term: u64,
+}
+impl VoteRequest {
+    pub fn term(&self) -> u64 {
+        self.term
+    }
+    pub fn candidate_id(&self) -> &str {
+        &self.candidate_id
+    }
+    pub fn last_log_index(&self) -> u64 {
+        self.last_log_index
+    }
+    pub fn last_log_term(&self) -> u64 {
+        self.last_log_term
+    }
 }
 
 pub struct AppendEntriesRequest {
@@ -79,8 +107,42 @@ pub struct AppendEntriesRequest {
     leader_commit: u64,
 }
 
+impl AppendEntriesRequest {
+pub fn term(&self) -> u64 {
+        self.term
+    }
+    pub fn leader_id(&self) -> &str {
+        &self.leader_id
+    }
+    pub fn prev_log_index(&self) -> u64 {
+        self.prev_log_index
+    }
+    pub fn prev_log_term(&self) -> u64 {
+        self.prev_log_term
+    }
+    pub fn entries(&self) -> &Vec<LogEntry> {
+        &self.entries
+    }
+    pub fn leader_commit(&self) -> u64 {
+        self.leader_commit
+    }
+}
+
 pub enum CommandMsg{
-    Read, Create
+    GetLeader(Msg<(), Option<SocketAddr>>),
+    Read(Msg<AppendEntriesRequest, AppendEntriesResult>),
+    Modify(Msg<AppendEntriesRequest, AppendEntriesResult>)
+}
+
+impl CommandMsg {
+    pub fn get_leader() -> (Self, Receiver<Option<SocketAddr>>) {
+        let (tx, rx) = oneshot::channel();
+        let msg = Self::GetLeader(Msg {
+            msg: (),
+            sender: tx,
+        });
+        (msg, rx)
+    }
 }
 
 pub enum RaftMsg {

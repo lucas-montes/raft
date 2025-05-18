@@ -2,7 +2,7 @@ use std::{net::SocketAddr, str::FromStr};
 
 use crate::{
     dto::VoteResponse,
-    state::{NodeId, Peers, Role},
+    state::{NodeId, Peer, Peers, Role},
     storage::LogEntry,
 };
 
@@ -29,7 +29,7 @@ pub trait Consensus {
         prev_log_index: usize,
         prev_log_term: u64,
         leader_commit: u64,
-        entries: Vec<LogEntry>,
+        entries: &Vec<LogEntry>,
     ) -> AppendEntriesResult {
         //1
         if term < self.current_term() {
@@ -81,7 +81,7 @@ pub trait Consensus {
         }
 
         if term > self.current_term() {
-            self.become_follower(self.leader(), term);
+            self.become_follower(None, term);
         }
 
         //NOTE: use something better for the id of the server

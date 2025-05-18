@@ -6,8 +6,8 @@ use tokio::task::JoinSet;
 use crate::{
     consensus::Consensus,
     dto::{AppendEntriesResponse, VoteResponse},
-    raft_capnp::{self, raft},
-    state::{Peer, Peers},
+    raft_capnp::{self, command, raft},
+    state::{Peer, Peers}, storage::LogEntry,
 };
 
 struct RequestError {
@@ -15,13 +15,13 @@ struct RequestError {
     error: capnp::Error,
 }
 
-pub async fn append_entries<S: Consensus>(state: &mut S) {
-    let tasks = prepare_append_entries_tasks(state).await;
+pub async fn append_entries<S: Consensus>(state: &mut S, entries: Option<Vec<LogEntry>>) {
+    let tasks = prepare_append_entries_tasks(state, entries).await;
     manage_append_entries_tasks(state, tasks).await;
 }
 
 async fn prepare_append_entries_tasks<S: Consensus>(
-    state: &mut S,
+    state: &mut S, entries: Option<Vec<LogEntry>>
 ) -> JoinSet<Result<AppendEntriesResponse, RequestError>> {
     let mut tasks = JoinSet::new();
     let current_term = state.current_term();
@@ -251,6 +251,24 @@ pub async fn create_client(addr: &SocketAddr) -> Result<raft::Client, Box<dyn st
     ));
     let mut rpc_system = RpcSystem::new(rpc_network, None);
     let client: raft::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
+
+    tokio::task::spawn_local(rpc_system);
+    Ok(client)
+}
+
+
+pub async fn create_client_com(addr: &SocketAddr) -> Result<command::Client, Box<dyn std::error::Error>> {
+    let stream = tokio::net::TcpStream::connect(addr).await?;
+    stream.set_nodelay(true)?;
+    let (reader, writer) = tokio_util::compat::TokioAsyncReadCompatExt::compat(stream).split();
+    let rpc_network = Box::new(twoparty::VatNetwork::new(
+        futures::io::BufReader::new(reader),
+        futures::io::BufWriter::new(writer),
+        rpc_twoparty_capnp::Side::Client,
+        Default::default(),
+    ));
+    let mut rpc_system = RpcSystem::new(rpc_network, None);
+    let client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
 
     tokio::task::spawn_local(rpc_system);
     Ok(client)
