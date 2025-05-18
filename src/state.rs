@@ -185,6 +185,7 @@ impl Consensus for State {
     }
 
     fn become_candidate(&mut self) {
+        println!("electinos time");
         self.role = Role::Candidate;
         self.hard_state.current_term += 1;
         self.hard_state.voted_for = Some(self.id);
@@ -333,11 +334,12 @@ impl Node {
                 _ = &mut election_timeout, if self.state.role != Role::Leader => {
                     self.state.become_candidate();
                     vote(&mut self.state).await;
-
+                    election_timeout.as_mut().reset(Instant::now() + election_dur);
                 }
 
                 //  heartbeat tick → send heartbeats if leader
                 _ = heartbeat_interval.tick(), if self.state.role == Role::Leader => {
+                    println!("sending heartbeats");
                     append_entries(&mut self.state, &[]).await;
                 }
             }

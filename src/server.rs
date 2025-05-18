@@ -89,30 +89,31 @@ impl raft::Server for Server {
                     .expect("error getting command as string"),
             ));
         }
-        let leader = pry!(request.get_leader_id());
+        let leader = pry!(pry!(request.get_leader_id()).to_str());
 
         let (msg, rx) = RaftMsg::request_append_entries(
             request.get_term(),
-            "leader".into(),
+            leader.into(),
             request.get_prev_log_index(),
             request.get_prev_log_term(),
             new_entries,
             request.get_leader_commit(),
         );
 
-        if let Err(err) = self.raft_channel.blocking_send(msg) {
+        let raft_channel = self.raft_channel.clone();
+        let entries_client = pry!(request.get_handle_entries());
+
+        Promise::from_future(async move {
+
+        if let Err(err) = raft_channel.send(msg).await {
             println!("error sending the append_entries to the state {err}");
-            return Promise::err(capnp::Error::failed(
+            return Err(capnp::Error::failed(
                 "error sending the append_entries to the state".into(),
             ));
         };
 
-        match rx.blocking_recv() {
+        match rx.await {
             Ok(resp) => {
-                let entries_client = pry!(request.get_handle_entries());
-
-                //TODO: make it better
-                Promise::from_future(async move {
                     let mut response = results.get().get_response()?;
 
                     match resp {
@@ -137,15 +138,17 @@ impl raft::Server for Server {
                         }
                     }
                     Ok(())
-                })
+
             }
             Err(err) => {
                 println!("error receiving the append_entries response {err}");
-                Promise::err(capnp::Error::failed(
+                Err(capnp::Error::failed(
                     "error receiving the append_entries response".into(),
                 ))
             }
         }
+
+    })
     }
 
     /// The node (a follower or candidate) receives a request from an other candidate to vote for it
@@ -162,28 +165,33 @@ impl raft::Server for Server {
         let term = request.get_term();
 
         let (msg, rx) = RaftMsg::request_vote(term, candidate_id, last_log_index, last_log_term);
+        let raft_channel = self.raft_channel.clone();
 
-        if let Err(err) = self.raft_channel.blocking_send(msg) {
-            println!("error sending the request_vote to the state {err}");
-            return Promise::err(capnp::Error::failed(
-                "error sending the request_vote to the state".into(),
-            ));
-        };
+        Promise::from_future(async move {
+            if let Err(err) = raft_channel.send(msg).await {
+                println!("error sending the request_vote to the state {err}");
+                return Err(capnp::Error::failed(
+                    "error sending the request_vote to the state".into(),
+                ));
+            };
 
-        match rx.blocking_recv() {
-            Ok(resp) => {
-                let mut response = pry!(results.get().get_response());
-
-                response.set_vote_granted(resp.vote_granted());
-                response.set_term(resp.term());
-                Promise::ok(())
+            match rx.await {
+                Ok(resp) => {
+                    let mut response = results.get().get_response()?;
+                    response.set_vote_granted(resp.vote_granted());
+                    response.set_term(resp.term());
+                    Ok(())
+                }
+                Err(err) => {
+                    println!("error receiving the request_vote response {err}");
+                    Err(capnp::Error::failed(
+                        "error receiving the request_vote response".into(),
+                    ))
+                }
             }
-            Err(err) => {
-                println!("error receiving the request_vote response {err}");
-                Promise::err(capnp::Error::failed(
-                    "error receiving the request_vote response".into(),
-                ))
-            }
-        }
+
+        })
+
+
     }
 }
