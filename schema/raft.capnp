@@ -53,7 +53,7 @@ struct AppendEntriesRequest {
   prevLogTerm @3 :UInt64;
   entries @4 :List(LogEntry);
   leaderCommit @5 :UInt64;
-  handleEntries @6 : LogEntriesHandler;
+  # handleEntries @6 : LogEntriesHandler;
 }
 
 struct AppendEntriesResponse {

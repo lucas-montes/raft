@@ -29,9 +29,6 @@ async fn prepare_append_entries_tasks<S: Consensus>(
     let addr = state.id().addr().to_string();
     let commit_index = state.commit_index();
     let last_log_info = state.last_log_info();
-
-    println!("sending heartbeats");
-
     // let mut m = capnp::message::Builder::new_default();
 
     for (index, peer) in state.peers().iter().enumerate() {
@@ -154,7 +151,6 @@ async fn send_vote(
     index: usize,
 ) -> Result<VoteResponse, RequestError> {
     let reply = request.send().promise.await;
-    println!("sending vote");
 
     let response = match reply {
         Ok(r) => r,
@@ -224,25 +220,24 @@ async fn manage_vote_tasks<S: Consensus>(
 ) {
     //NOTE: we start with one vote because we vote for ourself
     let mut votes = 1;
+    println!("handling votes");
     while let Some(res) = tasks.join_next().await {
         match res.expect("why joinhandle failed?") {
             Ok(r) => {
+                println!("counting vote");
                 votes += r.vote_granted() as u64;
+                println!("vote counted");
             }
             Err(error) => {
+                println!("trying to restart peer");
+                //TODO: we hang here, it blocks. spawn it
                 state.restart_peer(error.index).await;
+                println!("restart done");
             }
         }
     }
-
-    //NOTE: we add one to the number of nodes to count ourself
-    let num_nodes = state.peers().len() + 1;
-    let has_majority = votes > num_nodes.div_euclid(2) as u64;
-    if has_majority || num_nodes.eq(&1) {
-        state.become_leader()
-    } else {
-        state.become_candidate()
-    }
+    println!("counting votes");
+    state.count_votes(votes);
 }
 
 pub async fn create_client(addr: &SocketAddr) -> Result<raft::Client, Box<dyn std::error::Error>> {

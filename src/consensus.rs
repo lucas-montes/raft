@@ -6,6 +6,7 @@ use crate::{
     storage::{LogEntries, LogEntry, LogsInformation},
 };
 
+#[derive(Debug)]
 pub enum AppendEntriesResult {
     Ok,
     TermMismatch(u64),
@@ -109,6 +110,19 @@ pub trait Consensus {
                 return VoteResponse::not_granted(self.current_term());
             }
         };
+    }
+
+    fn count_votes(&mut self, votes: u64){
+        //NOTE: we add one to the number of nodes to count ourself
+        let num_nodes = self.peers().len() + 1;
+        let has_majority = votes > num_nodes.div_euclid(2) as u64;
+        if has_majority || num_nodes.eq(&1) {
+            self.become_leader();
+            println!("I am the leader now got {votes} votes for {num_nodes} nodes");
+        } else {
+            self.become_candidate();
+            println!("I still candidate now got {votes} votes for {num_nodes} nodes");
+        }
     }
 
     fn last_log_info(&self) -> LogsInformation;

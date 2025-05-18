@@ -185,7 +185,6 @@ impl Consensus for State {
     }
 
     fn become_candidate(&mut self) {
-        println!("electinos time");
         self.role = Role::Candidate;
         self.hard_state.current_term += 1;
         self.hard_state.voted_for = Some(self.id);
@@ -298,6 +297,7 @@ impl Node {
 
                 Some(rpc) = raft_channel.recv() => {
                     election_timeout.as_mut().reset(Instant::now() + election_dur);
+                    println!("electinos time resest {:?} ecause of rpc: {:?}", election_timeout.deadline(), rpc);
                     match rpc {
                         RaftMsg::AppendEntries(req) => {
                             let msg = req.msg;
@@ -332,6 +332,7 @@ impl Node {
 
                 //  election timeout fires → start election
                 _ = &mut election_timeout, if self.state.role != Role::Leader => {
+                    println!("electinos time");
                     self.state.become_candidate();
                     vote(&mut self.state).await;
                     election_timeout.as_mut().reset(Instant::now() + election_dur);

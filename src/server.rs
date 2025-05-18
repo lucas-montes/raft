@@ -101,19 +101,18 @@ impl raft::Server for Server {
         );
 
         let raft_channel = self.raft_channel.clone();
-        let entries_client = pry!(request.get_handle_entries());
+        // let entries_client = pry!(request.get_handle_entries());
 
         Promise::from_future(async move {
+            if let Err(err) = raft_channel.send(msg).await {
+                println!("error sending the append_entries to the state {err}");
+                return Err(capnp::Error::failed(
+                    "error sending the append_entries to the state".into(),
+                ));
+            };
 
-        if let Err(err) = raft_channel.send(msg).await {
-            println!("error sending the append_entries to the state {err}");
-            return Err(capnp::Error::failed(
-                "error sending the append_entries to the state".into(),
-            ));
-        };
-
-        match rx.await {
-            Ok(resp) => {
+            match rx.await {
+                Ok(resp) => {
                     let mut response = results.get().get_response()?;
 
                     match resp {
@@ -128,27 +127,25 @@ impl raft::Server for Server {
                             last_index,
                             last_term,
                         } => {
-                            let mut entries_client = entries_client.get_request();
-                            entries_client.get().set_last_log_index(last_index);
-                            entries_client.get().set_last_log_term(last_term);
-                            let entries_up_to_date = entries_client.send().promise.await?;
+                            // let mut entries_client = entries_client.get_request();
+                            // entries_client.get().set_last_log_index(last_index);
+                            // entries_client.get().set_last_log_term(last_term);
+                            // let entries_up_to_date = entries_client.send().promise.await?;
                             //TODO: use the response to update its log's entries
 
                             response.set_ok(());
                         }
                     }
                     Ok(())
-
+                }
+                Err(err) => {
+                    println!("error receiving the append_entries response {err}");
+                    Err(capnp::Error::failed(
+                        "error receiving the append_entries response".into(),
+                    ))
+                }
             }
-            Err(err) => {
-                println!("error receiving the append_entries response {err}");
-                Err(capnp::Error::failed(
-                    "error receiving the append_entries response".into(),
-                ))
-            }
-        }
-
-    })
+        })
     }
 
     /// The node (a follower or candidate) receives a request from an other candidate to vote for it
@@ -189,9 +186,6 @@ impl raft::Server for Server {
                     ))
                 }
             }
-
         })
-
-
     }
 }

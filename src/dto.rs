@@ -8,6 +8,7 @@ use crate::{
     storage::LogEntry,
 };
 
+#[derive(Debug)]
 pub struct VoteResponse {
     term: u64,
     vote_granted: bool,
@@ -62,11 +63,13 @@ impl TryFrom<raft_capnp::append_entries_response::Reader<'_>> for AppendEntriesR
     }
 }
 
+#[derive(Debug)]
 pub struct Msg<M, R> {
     pub msg: M,
     pub sender: oneshot::Sender<R>,
 }
 
+#[derive(Debug)]
 pub struct VoteRequest {
     term: u64,
     candidate_id: String,
@@ -88,6 +91,7 @@ impl VoteRequest {
     }
 }
 
+#[derive(Debug)]
 pub struct AppendEntriesRequest {
     pub term: u64,
     pub leader_id: String,
@@ -97,6 +101,7 @@ pub struct AppendEntriesRequest {
     pub leader_commit: u64,
 }
 
+#[derive(Debug)]
 pub enum CommandMsg {
     GetLeader(Msg<(), Option<SocketAddr>>),
     Read(Msg<AppendEntriesRequest, AppendEntriesResult>),
@@ -114,6 +119,7 @@ impl CommandMsg {
     }
 }
 
+#[derive(Debug)]
 pub enum RaftMsg {
     AppendEntries(Msg<AppendEntriesRequest, AppendEntriesResult>),
     Vote(Msg<VoteRequest, VoteResponse>),
