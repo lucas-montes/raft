@@ -4,6 +4,7 @@ use clap::Parser;
 use rand::random_range;
 use server::Server;
 use state::{Node, NodeId, State};
+use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
 
 pub mod raft_capnp {
     include!(concat!(env!("OUT_DIR"), "/raft_capnp.rs"));
@@ -26,6 +27,22 @@ pub struct Cli {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .json()
+                // .with_writer(non_blocking)
+                .log_internal_errors(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_current_span(true)
+                .with_span_events(FmtSpan::FULL)
+                .with_span_list(true)
+                .with_target(true),
+        ).init();
+
     let cli = Cli::parse();
 
     let nodes: Vec<SocketAddr> = cli
@@ -55,10 +72,10 @@ async fn main() {
 
             match tokio::try_join!(server_task, client_task) {
                 Ok(_) => {
-                    println!("Server and client are running");
+                    tracing::info!("Server and client are running");
                 }
                 Err(err) => {
-                    println!("Error in main: {:?}", err);
+                    tracing::error!("Error in main: {:?}", err);
                 }
             };
         })

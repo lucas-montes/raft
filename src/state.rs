@@ -61,9 +61,11 @@ impl Peer {
 
     async fn connect(addr: &SocketAddr) -> raft::Client {
         let mut counter = 0;
+        tracing::info!("trying to connect");
         loop {
             match create_client(addr).await {
                 Ok(client) => {
+                    tracing::info!("connected");
                     break client;
                 }
                 Err(err) => {
@@ -282,7 +284,7 @@ impl Node {
                             let resp = self.state.leader();
                             let sender = req.sender;
                             if let Err(_) = sender.send(resp){
-                                println!("Failed to send response in channel for get leader");
+                                tracing::error!("Failed to send response in channel for get leader");
                             }
                         }
                         CommandMsg::Read(req) => {
@@ -297,7 +299,7 @@ impl Node {
 
                 Some(rpc) = raft_channel.recv() => {
                     election_timeout.as_mut().reset(Instant::now() + election_dur);
-                    println!("electinos time resest {:?} ecause of rpc: {:?}", election_timeout.deadline(), rpc);
+                    tracing::info!("electinos time resest {:?} ecause of rpc: {:?}", election_timeout.deadline(), rpc);
                     match rpc {
                         RaftMsg::AppendEntries(req) => {
                             let msg = req.msg;
@@ -311,7 +313,7 @@ impl Node {
                                 msg.entries,
                             );
                             if let Err(_) = sender.send(resp){
-                                println!("Failed to send response in channel for append entries");
+                                tracing::error!("Failed to send response in channel for append entries");
                             }
                         }
                         RaftMsg::Vote(req) => {
@@ -324,7 +326,7 @@ impl Node {
                                 msg.last_log_term(),
                             );
                             if let Err(_) = sender.send(resp){
-                                println!("Failed to send response in channel for vote");
+                                tracing::error!("Failed to send response in channel for vote");
                             }
                         }
                     }
@@ -332,7 +334,7 @@ impl Node {
 
                 //  election timeout fires → start election
                 _ = &mut election_timeout, if self.state.role != Role::Leader => {
-                    println!("electinos time");
+                    tracing::info!("electinos time");
                     self.state.become_candidate();
                     vote(&mut self.state).await;
                     election_timeout.as_mut().reset(Instant::now() + election_dur);
@@ -340,7 +342,7 @@ impl Node {
 
                 //  heartbeat tick → send heartbeats if leader
                 _ = heartbeat_interval.tick(), if self.state.role == Role::Leader => {
-                    println!("sending heartbeats");
+                    tracing::info!("sending heartbeats");
                     append_entries(&mut self.state, &[]).await;
                 }
             }

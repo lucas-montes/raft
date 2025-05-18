@@ -67,7 +67,7 @@ async fn send_append_entries(
     let response = match reply {
         Ok(r) => r,
         Err(err) => {
-            println!(
+            tracing::error!(
                 "error from evaluating the reply send_append_entries: {:?}",
                 err
             );
@@ -78,7 +78,7 @@ async fn send_append_entries(
     let response_value = match response.get() {
         Ok(r) => r.get_response(),
         Err(err) => {
-            println!(
+            tracing::error!(
                 "error from send_append_entries getting the response: {:?}",
                 err
             );
@@ -89,7 +89,7 @@ async fn send_append_entries(
     let response = match response_value {
         Ok(r) => r.try_into(),
         Err(err) => {
-            println!(
+            tracing::error!(
                 "error from send_append_entries getting the response: {:?}",
                 err
             );
@@ -100,7 +100,7 @@ async fn send_append_entries(
     match response {
         Ok(r) => Ok(r),
         Err(err) => {
-            println!(
+            tracing::error!(
                 "error from send_append_entries getting the response: {:?}",
                 err
             );
@@ -117,7 +117,7 @@ async fn manage_append_entries_tasks<S: Consensus>(
         let task_result = match res {
             Ok(response) => response,
             Err(err) => {
-                println!("error in manage_append_entries_tasks: {:?}", err);
+                tracing::error!("error in manage_append_entries_tasks: {:?}", err);
                 continue;
             }
         };
@@ -132,7 +132,7 @@ async fn manage_append_entries_tasks<S: Consensus>(
         if let AppendEntriesResponse::Err(term) = append_entries_response {
             //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
             state.become_follower(None, term);
-            println!("im a follower now so i do not send more hearbeats");
+            tracing::info!("im a follower now so i do not send more hearbeats");
             break;
         };
     }
@@ -155,7 +155,7 @@ async fn send_vote(
     let response = match reply {
         Ok(r) => r,
         Err(err) => {
-            println!(
+            tracing::error!(
                 "error from evaluating the reply send_vote_request: {:?}",
                 err
             );
@@ -166,7 +166,7 @@ async fn send_vote(
     let response_value = match response.get() {
         Ok(r) => r.get_response(),
         Err(err) => {
-            println!(
+            tracing::error!(
                 "error from send_vote_request getting the response: {:?}",
                 err
             );
@@ -177,7 +177,7 @@ async fn send_vote(
     return match response_value {
         Ok(r) => Ok(r.into()),
         Err(err) => {
-            println!(
+            tracing::error!(
                 "error from send_vote_request getting the response: {:?}",
                 err
             );
@@ -220,23 +220,18 @@ async fn manage_vote_tasks<S: Consensus>(
 ) {
     //NOTE: we start with one vote because we vote for ourself
     let mut votes = 1;
-    println!("handling votes");
     while let Some(res) = tasks.join_next().await {
         match res.expect("why joinhandle failed?") {
             Ok(r) => {
-                println!("counting vote");
                 votes += r.vote_granted() as u64;
-                println!("vote counted");
             }
             Err(error) => {
-                println!("trying to restart peer");
                 //TODO: we hang here, it blocks. spawn it
                 state.restart_peer(error.index).await;
-                println!("restart done");
             }
         }
     }
-    println!("counting votes");
+    tracing::info!("counting votes");
     state.count_votes(votes);
 }
 

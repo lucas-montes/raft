@@ -21,7 +21,7 @@ pub struct Server {
 
 impl Server {
     pub async fn run(self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
-        println!("server start");
+        tracing::info!("server start");
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         let client: raft::Client = capnp_rpc::new_client(self);
         loop {
@@ -105,7 +105,7 @@ impl raft::Server for Server {
 
         Promise::from_future(async move {
             if let Err(err) = raft_channel.send(msg).await {
-                println!("error sending the append_entries to the state {err}");
+                tracing::error!("error sending the append_entries to the state {err}");
                 return Err(capnp::Error::failed(
                     "error sending the append_entries to the state".into(),
                 ));
@@ -139,7 +139,7 @@ impl raft::Server for Server {
                     Ok(())
                 }
                 Err(err) => {
-                    println!("error receiving the append_entries response {err}");
+                    tracing::error!("error receiving the append_entries response {err}");
                     Err(capnp::Error::failed(
                         "error receiving the append_entries response".into(),
                     ))
@@ -155,7 +155,7 @@ impl raft::Server for Server {
         mut results: raft::RequestVoteResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let request = pry!(params.get());
-        println!("the server received the request_vote {request:?}");
+        tracing::info!("the server received the request_vote {request:?}");
         let candidate_id = pry!(pry!(request.get_candidate_id()).to_string());
         let last_log_index = request.get_last_log_index();
         let last_log_term = request.get_last_log_term();
@@ -166,7 +166,7 @@ impl raft::Server for Server {
 
         Promise::from_future(async move {
             if let Err(err) = raft_channel.send(msg).await {
-                println!("error sending the request_vote to the state {err}");
+                tracing::error!("error sending the request_vote to the state {err}");
                 return Err(capnp::Error::failed(
                     "error sending the request_vote to the state".into(),
                 ));
@@ -180,7 +180,7 @@ impl raft::Server for Server {
                     Ok(())
                 }
                 Err(err) => {
-                    println!("error receiving the request_vote response {err}");
+                    tracing::error!("error receiving the request_vote response {err}");
                     Err(capnp::Error::failed(
                         "error receiving the request_vote response".into(),
                     ))

@@ -118,10 +118,10 @@ pub trait Consensus {
         let has_majority = votes > num_nodes.div_euclid(2) as u64;
         if has_majority || num_nodes.eq(&1) {
             self.become_leader();
-            println!("I am the leader now got {votes} votes for {num_nodes} nodes");
+            tracing::info!("I am the leader now got {votes} votes for {num_nodes} nodes");
         } else {
             self.become_candidate();
-            println!("I still candidate now got {votes} votes for {num_nodes} nodes");
+            tracing::info!("I still candidate now got {votes} votes for {num_nodes} nodes");
         }
     }
 
