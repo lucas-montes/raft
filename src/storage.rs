@@ -1,5 +1,8 @@
 use std::{cmp::Ordering, fmt::Debug, ops::Deref};
 
+use tokio::fs::File;
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
+
 #[derive(Debug, Eq)]
 pub struct LogEntry {
     index: u64,
@@ -115,6 +118,16 @@ impl LogEntries {
                 return false;
             }
         }
+    }
+
+
+    pub async fn create(&mut self, data: Vec<u8>)->Result<(), String> {
+        let mut file = File::open("data/table_1").await.unwrap();
+
+        file.write(&data).await.unwrap();
+file.flush();
+        Ok(())
+
     }
 }
 

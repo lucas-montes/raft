@@ -15,7 +15,7 @@ use tokio::{
 use crate::{
     client::{append_entries, create_client, vote},
     consensus::Consensus,
-    dto::{CommandMsg, RaftMsg},
+    dto::{CommandMsg, Entry, Operation, RaftMsg},
     raft_capnp::raft,
     storage::{LogEntries, LogsInformation},
 };
@@ -302,15 +302,32 @@ impl Node {
                             // Handle read command
                         }
                         CommandMsg::Modify(req) => {
-                            // Handle modify command
+                           match req.msg {
+                                Operation::Create(data) => {
+                                    let resp = self.state.log_entries().create(data.clone()).await;
+                                    let sender = req.sender;
+                                    if let Err(_) = sender.send(Entry {
+                                        id: "hey".to_string(),
+                                        data
+                                    }){
+                                        tracing::error!("Failed to send response in channel for create");
+                                    }
+                                }
+                                Operation::Update(id, data) => {
+                                    // Handle update command
+                                }
+                                Operation::Delete(id) => {
+                                    // Handle delete command
+                                }
+                            }
                         }
                     }
 
                 }
 
                 Some(rpc) = raft_channel.recv() => {
-                    election_timeout.as_mut().reset(Instant::now() + election_dur);
                     tracing::info!("electinos time resest {:?} ecause of rpc", election_timeout.deadline().elapsed());
+                    election_timeout.as_mut().reset(Instant::now() + election_dur);
                     match rpc {
                         RaftMsg::AppendEntries(req) => {
                             let msg = req.msg;
@@ -347,6 +364,7 @@ impl Node {
 
                 //  election timeout fires → start election
                 _ = &mut election_timeout, if self.state.role != Role::Leader => {
+                    tracing::info!("electinos time put {:?}", election_timeout.deadline().elapsed());
                     election_timeout.as_mut().reset(Instant::now() + election_dur);
                     tracing::info!("electinos time");
                     self.state.become_candidate();

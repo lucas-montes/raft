@@ -100,15 +100,48 @@ pub struct AppendEntriesRequest {
     pub entries: Vec<LogEntry>,
     pub leader_commit: u64,
 }
+#[derive(Debug)]
+pub struct Entry {
+   pub id: String,
+   pub data: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct Query{
+    id: String,
+    filter: Option<String>
+}
+#[derive(Debug)]
+pub enum Operation{
+Create(Vec<u8>),
+Update(String, Vec<u8>),
+Delete(String)
+}
 
 #[derive(Debug)]
 pub enum CommandMsg {
     GetLeader(Msg<(), Option<SocketAddr>>),
-    Read(Msg<AppendEntriesRequest, AppendEntriesResult>),
-    Modify(Msg<AppendEntriesRequest, AppendEntriesResult>),
+    Read(Msg<Query, Entry>),
+    Modify(Msg<Operation, Entry>),
 }
 
 impl CommandMsg {
+    pub fn create(data: Vec<u8>) -> (Self, Receiver<Entry>) {
+        let (tx, rx) = oneshot::channel();
+        let msg = Self::Modify(Msg {
+            msg: Operation::Create(data),
+            sender: tx,
+        });
+        (msg, rx)
+    }
+    pub fn update(id: String, data: Vec<u8>) -> (Self, Receiver<Entry>) {
+        let (tx, rx) = oneshot::channel();
+        let msg = Self::Modify(Msg {
+            msg: Operation::Update(id, data),
+            sender: tx,
+        });
+        (msg, rx)
+    }
     pub fn get_leader() -> (Self, Receiver<Option<SocketAddr>>) {
         let (tx, rx) = oneshot::channel();
         let msg = Self::GetLeader(Msg {

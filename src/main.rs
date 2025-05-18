@@ -35,18 +35,15 @@ async fn main() {
             tracing_subscriber::fmt::layer()
                 .json()
                 // .with_writer(non_blocking)
-                .log_internal_errors(true), // .with_file(true)
-                                            // .with_line_number(true)
-                                            // .with_thread_ids(true)
-                                            // .with_thread_names(true)
-                                            // .with_current_span(true)
-                                            // .with_span_events(FmtSpan::FULL)
-                                            // .with_span_list(true)
-                                            // .with_target(true),
+                .log_internal_errors(true)
+                .with_target(false).flatten_event(true).with_span_list(false),
         )
         .init();
 
     let cli = Cli::parse();
+
+    let span = tracing::span!(tracing::Level::INFO, "rafty", addr = %cli.addr);
+let _enter = span.enter();
 
     let nodes: Vec<SocketAddr> = cli
         .nodes

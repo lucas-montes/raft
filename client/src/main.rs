@@ -49,6 +49,7 @@ async fn request(cli: Cli) {
     let raw_result = resp.get().unwrap().get_data().unwrap();
     let result = raw_result.get_data().unwrap();
     println!("response: {:?}", String::from_utf8_lossy(result));
+    println!("response: {:?}", raw_result);
 }
 
 #[tokio::main(flavor = "current_thread")]

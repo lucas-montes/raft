@@ -1,7 +1,7 @@
 @0x9663f4dd604afa36;
 
 struct Entry {
-id @0: UInt64;
+id @0: Text;
 data @1: Data;
 }
 
@@ -15,27 +15,27 @@ interface Command {
 
   query @3 () -> (query :Query);
 
+    interface Item {
+      read @0 () -> (data :Entry);
+      update @1 (data :Data) -> (item :Item);
+      delete @2 () -> (status :Bool);
+    }
+
+    interface Query {
+      filter @0 (key :Text, value :Data) -> (query :Query);
+      limit @1 (count :UInt32) -> (query :Query);
+      execute @2 () -> (result :ResultSet);
+    }
+
+    interface ResultSet {
+      next @0 () -> (item :Item);
+      all @1 () -> (items :List(Entry));
+    }
 }
 
-interface Item {
-  read @0 () -> (data :Entry);
-  update @1 (data :Entry) -> (item :Item);
-  delete @2 () -> (status :Bool);
-}
-
-interface Query {
-  filter @0 (key :Text, value :Data) -> (query :Query);
-  limit @1 (count :UInt32) -> (query :Query);
-  execute @2 () -> (result :ResultSet);
-}
-
-interface ResultSet {
-  next @0 () -> (item :Item);
-  all @1 () -> (items :List(Entry));
-}
 
 
-interface Raft {
+interface Raft extends (Command) {
   appendEntries @0 (request: AppendEntriesRequest) -> (response: AppendEntriesResponse);
   requestVote @1 (term :UInt64, candidateId :Text, lastLogIndex :UInt64, lastLogTerm :UInt64) -> (response: VoteResponse);
 
