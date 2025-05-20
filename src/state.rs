@@ -159,18 +159,24 @@ pub struct HardState {
     current_term: u64,
     voted_for: Option<NodeId>,
     log_entries: LogEntries,
+    file_path: String,
 }
 
 impl HardState {
+    fn new(file_path: String) -> Self {
+        Self {
+            file_path,
+            ..Default::default()
+        }
+    }
+
     async fn save_to_disk(&self) -> Result<(), String> {
         let file = std::fs::OpenOptions::new()
             .write(true)
             .truncate(true)
-            .open("data/hard_state")
+            .open(&self.file_path)
             .expect("failed to open hard state file");
-
-        let write = BufWriter::new(file);
-
+        let writer = BufWriter::new(file);
         let mut message = capnp::message::Builder::new_default();
 
         {
@@ -198,7 +204,7 @@ impl HardState {
             }
         }
 
-        capnp::serialize_packed::write_message(write, &message).map_err(|err| {
+        capnp::serialize_packed::write_message(writer, &message).map_err(|err| {
             tracing::error!("failed to write hard state to disk: {}", err);
             err.to_string()
         })
@@ -232,6 +238,7 @@ impl State {
     pub fn new(id: NodeId) -> Self {
         Self {
             id,
+            hard_state: HardState::new(format!("data/state/{}", id.addr())),
             ..Default::default()
         }
     }

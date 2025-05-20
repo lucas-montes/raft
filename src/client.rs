@@ -47,7 +47,7 @@ async fn prepare_append_entries_tasks<S: Consensus>(
             let mut entry_data = entries_client.reborrow().get(i as u32);
             entry_data.set_index(entry.index());
             entry_data.set_term(entry.term());
-            entry_data.set_command(&entry.command());
+            entry_data.set_command(entry.command());
         }
 
         tasks.spawn_local(send_append_entries(request, index));
@@ -104,7 +104,7 @@ async fn send_append_entries(
                 "error from send_append_entries getting the response: {:?}",
                 err
             );
-            return Err(RequestError { index, error: err });
+            Err(RequestError { index, error: err })
         }
     }
 }
@@ -181,10 +181,32 @@ async fn send_vote(
                 "error from send_vote_request getting the response: {:?}",
                 err
             );
-            return Err(RequestError { index, error: err });
+            Err(RequestError { index, error: err })
         }
     };
 }
+
+/*
+fn prepare_vote_request(
+    peer: &Peer,
+    current_term: u64,
+    addr: &str,
+    last_index: u64,
+    last_term: u64,
+) {
+    let client = peer.client();
+    let mut request = client.request_vote_request();
+    request.get().set_term(current_term);
+    request.get().set_candidate_id(&addr);
+    request
+        .get()
+        .set_last_log_index(last_log_info.last_log_index());
+    request
+        .get()
+        .set_last_log_term(last_log_info.last_log_term());
+    request
+}
+*/
 
 async fn prepare_vote_tasks<S: Consensus>(
     state: &mut S,
@@ -229,6 +251,7 @@ async fn manage_vote_tasks<S: Consensus>(
             Err(error) => {
                 //TODO: we hang here, it blocks. spawn it
                 state.restart_peer(error.index).await;
+                tracing::error!("reconnected")
             }
         }
     }
