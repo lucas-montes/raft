@@ -132,7 +132,7 @@ async fn manage_append_entries_tasks<S: Consensus>(
         if let AppendEntriesResponse::Err(term) = append_entries_response {
             //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
             state.become_follower(None, term);
-            tracing::info!(action="become_follower", term = term);
+            tracing::info!(action = "become_follower", term = term);
             break;
         };
     }

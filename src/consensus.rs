@@ -14,6 +14,7 @@ pub enum AppendEntriesResult {
 }
 
 pub trait Consensus {
+    async fn commit_hard_state(&self);
     async fn restart_peer(&mut self, peer_index: usize); //TODO: doesnt belong here
     fn current_term(&self) -> u64;
     fn commit_index(&self) -> u64;
@@ -33,7 +34,14 @@ pub trait Consensus {
         leader_commit: u64,
         entries: Vec<LogEntry>,
     ) -> AppendEntriesResult {
-        tracing::info!(action="receive append entries", term = term, leader = leader_id, prev_log_index = prev_log_index, prev_log_term = prev_log_term, leader_commit = leader_commit);
+        tracing::info!(
+            action = "receive append entries",
+            term = term,
+            leader = leader_id,
+            prev_log_index = prev_log_index,
+            prev_log_term = prev_log_term,
+            leader_commit = leader_commit
+        );
         //1
         if term < self.current_term() {
             return AppendEntriesResult::TermMismatch(self.current_term());
@@ -77,7 +85,13 @@ pub trait Consensus {
         last_log_index: u64,
         last_log_term: u64,
     ) -> VoteResponse {
-        tracing::info!(action="receive vote", term = term, candidate = candidate_id, last_log_index = last_log_index, last_log_term = last_log_term);
+        tracing::info!(
+            action = "receive vote",
+            term = term,
+            candidate = candidate_id,
+            last_log_index = last_log_index,
+            last_log_term = last_log_term
+        );
 
         if term < self.current_term() {
             return VoteResponse::not_granted(self.current_term());
@@ -101,13 +115,12 @@ pub trait Consensus {
             || (last_log_index >= last_log_info.last_log_index()
                 && last_log_term == last_log_info.last_log_term());
 
-                if condidate_id_matches && logs_uptodate {
-                    self.vote_for(candidate);
-                    VoteResponse::granted(self.current_term())
-                } else {
-                    VoteResponse::not_granted(self.current_term())
-                }
-
+        if condidate_id_matches && logs_uptodate {
+            self.vote_for(candidate);
+            VoteResponse::granted(self.current_term())
+        } else {
+            VoteResponse::not_granted(self.current_term())
+        }
     }
 
     fn count_votes(&mut self, votes: u64) {
@@ -115,9 +128,19 @@ pub trait Consensus {
         let has_majority = votes > num_nodes.div_euclid(2) as u64;
         if has_majority || num_nodes.eq(&1) {
             self.become_leader();
-            tracing::info!(action = "become leader", term = self.current_term(), votes=votes, peers=num_nodes);
+            tracing::info!(
+                action = "become leader",
+                term = self.current_term(),
+                votes = votes,
+                peers = num_nodes
+            );
         } else {
-            tracing::info!(action = "not enough votes", term = self.current_term(), votes=votes, peers=num_nodes);
+            tracing::info!(
+                action = "not enough votes",
+                term = self.current_term(),
+                votes = votes,
+                peers = num_nodes
+            );
         }
     }
 

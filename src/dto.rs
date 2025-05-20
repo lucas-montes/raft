@@ -102,20 +102,20 @@ pub struct AppendEntriesRequest {
 }
 #[derive(Debug)]
 pub struct Entry {
-   pub id: String,
-   pub data: Vec<u8>,
+    pub id: String,
+    pub data: Vec<u8>,
 }
 
 #[derive(Debug)]
-pub struct Query{
+pub struct Query {
     id: String,
-    filter: Option<String>
+    filter: Option<String>,
 }
 #[derive(Debug)]
-pub enum Operation{
-Create(Vec<u8>),
-Update(String, Vec<u8>),
-Delete(String)
+pub enum Operation {
+    Create(Vec<u8>),
+    Update(String, Vec<u8>),
+    Delete(String),
 }
 
 #[derive(Debug)]

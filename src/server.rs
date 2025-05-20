@@ -51,25 +51,33 @@ impl Server {
 
 struct Item {
     id: String,
-    data: Vec<u8>,//TODO: make it a pointer or something
+    data: Vec<u8>, //TODO: make it a pointer or something
     commands_channel: Sender<CommandMsg>,
 }
 
 impl command::item::Server for Item {
-    fn read(&mut self,_:command::item::ReadParams<>,mut results:command::item::ReadResults<>) ->  capnp::capability::Promise<(), capnp::Error> {
+    fn read(
+        &mut self,
+        _: command::item::ReadParams,
+        mut results: command::item::ReadResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
         let mut data = results.get().init_data();
         data.set_data(&self.data);
         data.set_id(&self.id);
-                Promise::ok(())
+        Promise::ok(())
     }
 
-    fn update(&mut self,params:command::item::UpdateParams<>,mut results:command::item::UpdateResults<>) ->  capnp::capability::Promise<(), capnp::Error> {
-let data = pry!(pry!(params.get()).get_data()).to_vec();
-let commands_channel = self.commands_channel.clone();
-let id = self.id.clone();
+    fn update(
+        &mut self,
+        params: command::item::UpdateParams,
+        mut results: command::item::UpdateResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let data = pry!(pry!(params.get()).get_data()).to_vec();
+        let commands_channel = self.commands_channel.clone();
+        let id = self.id.clone();
         Promise::from_future(async move {
             let (msg, rx) = CommandMsg::update(id, data);
-            if let Err(err) = commands_channel.send(msg).await{
+            if let Err(err) = commands_channel.send(msg).await {
                 tracing::error!("error sending the create command {err}");
                 return Err(capnp::Error::failed(
                     "error sending the create command".into(),
@@ -77,13 +85,11 @@ let id = self.id.clone();
             };
             match rx.await {
                 Ok(entry) => {
-                    results.get().set_item(
-                        capnp_rpc::new_client(Item {
-                            id: entry.id,
-                            data: entry.data,
-                            commands_channel
-                        })
-                    );
+                    results.get().set_item(capnp_rpc::new_client(Item {
+                        id: entry.id,
+                        data: entry.data,
+                        commands_channel,
+                    }));
                 }
                 Err(err) => {
                     tracing::error!("error receiving the update command {err}");
@@ -93,8 +99,8 @@ let id = self.id.clone();
                 }
             };
 
-
-            Ok(())})
+            Ok(())
+        })
     }
 }
 
@@ -105,7 +111,7 @@ impl command::Server for Server {
         mut results: command::StartTransactionResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let channel = self.commands_channel.clone();
-        tracing::info!(action="start_transaction");
+        tracing::info!(action = "start_transaction");
         Promise::from_future(async move {
             let (msg, rx) = CommandMsg::get_leader();
             channel.send(msg).await.expect("msg not sent");
@@ -124,10 +130,10 @@ impl command::Server for Server {
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let commands_channel = self.commands_channel.clone();
         let data = pry!(pry!(params.get()).get_data()).to_vec();
-        tracing::info!(action="create");
+        tracing::info!(action = "create");
         Promise::from_future(async move {
             let (msg, rx) = CommandMsg::create(data);
-            if let Err(err) = commands_channel.send(msg).await{
+            if let Err(err) = commands_channel.send(msg).await {
                 tracing::error!("error sending the create command {err}");
                 return Err(capnp::Error::failed(
                     "error sending the create command".into(),
@@ -135,13 +141,11 @@ impl command::Server for Server {
             };
             match rx.await {
                 Ok(entry) => {
-                    results.get().set_item(
-                        capnp_rpc::new_client(Item {
-                            id: entry.id,
-                            data: entry.data,
-                            commands_channel
-                        })
-                    );
+                    results.get().set_item(capnp_rpc::new_client(Item {
+                        id: entry.id,
+                        data: entry.data,
+                        commands_channel,
+                    }));
                 }
                 Err(err) => {
                     tracing::error!("error receiving the create command {err}");
@@ -170,8 +174,7 @@ impl raft::Server for Server {
             new_entries.push(LogEntry::new(
                 e.get_index(),
                 e.get_term(),
-                pry!(e.get_command())
-                    .to_vec(),
+                pry!(e.get_command()).to_vec(),
             ));
         }
         let leader = pry!(pry!(request.get_leader_id()).to_str());

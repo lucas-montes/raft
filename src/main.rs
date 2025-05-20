@@ -1,9 +1,10 @@
 use std::net::SocketAddr;
 
 use clap::Parser;
+use node::Node;
 use rand::random_range;
 use server::Server;
-use state::{Node, NodeId, State};
+use state::{NodeId, State};
 use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
 
 pub mod raft_capnp {
@@ -13,6 +14,7 @@ pub mod raft_capnp {
 mod client;
 mod consensus;
 mod dto;
+mod node;
 mod server;
 mod state;
 mod storage;
@@ -36,14 +38,16 @@ async fn main() {
                 .json()
                 // .with_writer(non_blocking)
                 .log_internal_errors(true)
-                .with_target(false).flatten_event(true).with_span_list(false),
+                .with_target(false)
+                .flatten_event(true)
+                .with_span_list(false),
         )
         .init();
 
     let cli = Cli::parse();
 
     let span = tracing::span!(tracing::Level::INFO, "rafty", addr = %cli.addr);
-let _enter = span.enter();
+    let _enter = span.enter();
 
     let nodes: Vec<SocketAddr> = cli
         .nodes
@@ -56,18 +60,19 @@ let _enter = span.enter();
             let heartbeat_interval = random_range(1.0..2.9);
             let election_timeout = random_range(3.0..6.0);
             //TODO: when starting a new node (or restarting) read the state from disk
-            let state = State::new(NodeId::new(cli.addr.clone()));
+
             let (rtx, rrx) = tokio::sync::mpsc::channel(100);
             let (ctx, crx) = tokio::sync::mpsc::channel(100);
-            let mut service = Node::new(state, heartbeat_interval, election_timeout, rrx, crx);
 
             let server = Server::new(rtx, ctx);
-
             let server_task = tokio::task::spawn_local(server.run(cli.addr));
 
+            let mut state = State::new(NodeId::new(cli.addr.clone()));
+
             for node in nodes {
-                service.add_peer(node).await;
+                state.add_peer(node).await;
             }
+            let service = Node::new(state, heartbeat_interval, election_timeout, rrx, crx);
 
             let client_task = tokio::task::spawn_local(service.run());
 

@@ -8,15 +8,9 @@ use std::{
     time::Duration,
 };
 
-use tokio::{
-    sync::mpsc::Receiver,
-    time::{interval, sleep, Instant},
-};
-
 use crate::{
-    client::{append_entries, create_client, vote},
+    client::create_client,
     consensus::Consensus,
-    dto::{CommandMsg, Entry, Operation, RaftMsg},
     raft_capnp::{self, raft},
     storage::{LogEntries, LogsInformation},
 };
@@ -47,7 +41,7 @@ impl Peer {
         self.client.clone()
     }
 
-    async fn new(addr: SocketAddr) -> Self {
+    pub async fn new(addr: SocketAddr) -> Self {
         let client = Self::connect(addr).await;
         Self {
             id: NodeId(addr),
@@ -63,11 +57,11 @@ impl Peer {
     async fn connect(addr: SocketAddr) -> raft::Client {
         tokio::task::spawn_local(async move {
             let mut counter = 0;
-            tracing::info!(action="adding peer", peer = addr.to_string());
+            tracing::info!(action = "adding peer", peer = addr.to_string());
             loop {
                 match create_client(&addr).await {
                     Ok(client) => {
-                        tracing::info!(action="peer connected", peer = addr.to_string());
+                        tracing::info!(action = "peer connected", peer = addr.to_string());
                         break client;
                     }
                     Err(err) => {
@@ -90,9 +84,9 @@ impl Peer {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct Peers{
+pub struct Peers {
     connected: Vec<Peer>,
-    disconnected: Vec<Peer>
+    disconnected: Vec<Peer>,
 }
 
 impl Peers {
@@ -103,7 +97,7 @@ impl Peers {
     }
 
     pub fn total_connected(&self) -> usize {
-                //NOTE: we add one to the number of nodes to count ourself
+        //NOTE: we add one to the number of nodes to count ourself
         self.connected.len() + 1
     }
 }
@@ -241,12 +235,20 @@ impl State {
             ..Default::default()
         }
     }
+    pub fn role(&self) -> Role {
+        self.role
+    }
+
+    pub async fn add_peer(&mut self, addr: SocketAddr) {
+        self.peers.push(Peer::new(addr).await);
+    }
 }
 
 impl Consensus for State {
     fn id(&self) -> &NodeId {
         &self.id
     }
+
     fn peers(&self) -> &Peers {
         &self.peers
     }
@@ -286,7 +288,7 @@ impl Consensus for State {
     }
 
     fn vote_for(&mut self, node: NodeId) {
-        tracing::info!(action="voting for", node = node.addr().to_string());
+        tracing::info!(action = "voting for", node = node.addr().to_string());
         self.hard_state.voted_for = Some(node);
     }
 
@@ -305,159 +307,15 @@ impl Consensus for State {
     fn last_log_info(&self) -> LogsInformation {
         self.hard_state.log_entries.last_log_info()
     }
+
     async fn restart_peer(&mut self, peer_index: usize) {
         self.peers[peer_index].reconnect().await
     }
-}
 
-#[derive(Debug)]
-pub struct Node {
-    state: State,
-    heartbeat_interval: f64,
-    election_timeout: f64,
-    raft_channel: Receiver<RaftMsg>,
-    commands_channel: Receiver<CommandMsg>,
-}
-
-impl Node {
-    pub fn new(
-        state: State,
-        heartbeat_interval: f64,
-        election_timeout: f64,
-        raft_channel: Receiver<RaftMsg>,
-        commands_channel: Receiver<CommandMsg>,
-    ) -> Self {
-        Self {
-            state,
-            raft_channel,
-            heartbeat_interval,
-            election_timeout,
-            commands_channel,
-        }
-    }
-
-    pub async fn add_peer(&mut self, addr: SocketAddr) {
-        self.state.peers.push(Peer::new(addr).await);
-    }
-
-    async fn handle_command(&mut self, rpc: CommandMsg) {
-        match rpc {
-            CommandMsg::GetLeader(req) => {
-                let resp = self.state.leader();
-                //TODO: instead of sendig only the addr and creating the client on the server I
-                //should send the client in peers
-                let sender = req.sender;
-                if let Err(_) = sender.send(resp) {
-                    tracing::error!("Failed to send response in channel for get leader");
-                }
-            }
-            CommandMsg::Read(req) => {
-                // Handle read command
-            }
-            CommandMsg::Modify(req) => {
-                //TODO: when new operation:
-                // 1 save into the in memory logs
-                // 2 persist to disk
-                // 3 broadcast to all peers
-                // 4 when majority of peers have the log, apply to state machine
-                let current_term = self.state.current_term();
-                let log_entries = self.state.log_entries();
-                match req.msg {
-                    Operation::Create(data) => {
-                        //TODO: it would be cool to be able to serialize the whole command? how to
-                        //keep track of the commands in a better and easier way without copying all
-                        //the data so much?
-                        log_entries.new_entry(current_term, data.clone());
-                        self.state.hard_state.save_to_disk().await.unwrap();
-
-                        let log_entries = self.state.log_entries();
-                        if let Err(err) = log_entries.create(data.clone()).await {
-                            tracing::error!("Failed to create log entry {}", err);
-                        };
-                        let sender = req.sender;
-                        let entry = Entry {
-                            id: "hey".to_string(),
-                            data,
-                        };
-                        if sender.send(entry).is_err() {
-                            tracing::error!("Failed to send response in channel for create");
-                        }
-                    }
-                    Operation::Update(id, data) => {
-                        // Handle update command
-                    }
-                    Operation::Delete(id) => {
-                        // Handle delete command
-                    }
-                }
-            }
-        }
-    }
-
-    pub async fn run(mut self) {
-        let heartbeat_dur = Duration::from_secs_f64(self.heartbeat_interval);
-        let election_dur = Duration::from_secs_f64(self.election_timeout);
-        let mut heartbeat_interval = interval(heartbeat_dur);
-        let mut election_timeout = Box::pin(sleep(election_dur));
-
-        loop {
-            tokio::select! {
-                //  Incoming RPCs from external users
-                Some(rpc) = self.commands_channel.recv() => {
-                    self.handle_command(rpc).await;
-                }
-
-                Some(rpc) = self.raft_channel.recv() => {
-                    election_timeout.as_mut().reset(Instant::now() + election_dur);
-                    match rpc {
-                        RaftMsg::AppendEntries(req) => {
-                            let msg = req.msg;
-                            let sender = req.sender;
-                            let resp = self.state.handle_append_entries(
-                                msg.term,
-                                &msg.leader_id,
-                                msg.prev_log_index as usize,
-                                msg.prev_log_term,
-                                msg.leader_commit,
-                                msg.entries,
-                            );
-                            if let Err(_) = sender.send(resp){
-                                tracing::error!("Failed to send response in channel for append entries");
-                            }
-                        }
-                        RaftMsg::Vote(req) => {
-                            let msg = req.msg;
-                            let sender = req.sender;
-                            let resp = self.state.handle_request_vote(
-                                msg.term(),
-                                msg.candidate_id(),
-                                msg.last_log_index(),
-                                msg.last_log_term(),
-                            );
-                            if let Err(_) = sender.send(resp){
-                                tracing::error!("Failed to send response in channel for vote");
-                            }
-                        }
-                    }
-                }
-
-                //TODO: maybe the following functions could be driven by the role and a trait
-
-                //  election timeout fires → start election
-                _ = &mut election_timeout, if self.state.role != Role::Leader => {
-                    election_timeout.as_mut().reset(Instant::now() + election_dur);
-                    tracing::info!(action="become candidate");
-                    self.state.become_candidate();
-                    tracing::info!(action="send votes");
-                    vote(&mut self.state).await;
-                }
-
-                //  heartbeat tick → send heartbeats if leader
-                _ = heartbeat_interval.tick(), if self.state.role == Role::Leader => {
-                    tracing::info!(action="send heartbeat");
-                    append_entries(&mut self.state, &[]).await;
-                }
-            }
-        }
+    async fn commit_hard_state(&self) {
+        self.hard_state
+            .save_to_disk()
+            .await
+            .expect("failed to save hard state");
     }
 }
