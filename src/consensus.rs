@@ -33,6 +33,7 @@ pub trait Consensus {
         leader_commit: u64,
         entries: Vec<LogEntry>,
     ) -> AppendEntriesResult {
+        tracing::info!(action="receive append entries", term = term, leader = leader_id, prev_log_index = prev_log_index, prev_log_term = prev_log_term, leader_commit = leader_commit);
         //1
         if term < self.current_term() {
             return AppendEntriesResult::TermMismatch(self.current_term());
@@ -76,6 +77,8 @@ pub trait Consensus {
         last_log_index: u64,
         last_log_term: u64,
     ) -> VoteResponse {
+        tracing::info!(action="receive vote", term = term, candidate = candidate_id, last_log_index = last_log_index, last_log_term = last_log_term);
+
         if term < self.current_term() {
             return VoteResponse::not_granted(self.current_term());
         }
@@ -89,7 +92,6 @@ pub trait Consensus {
             self.become_follower(None, term);
         }
 
-        //NOTE: use something better for the id of the server
         let condidate_id_matches = self.voted_for().is_none_or(|addr| addr.eq(&candidate));
 
         let last_log_info = self.last_log_info();
@@ -99,29 +101,23 @@ pub trait Consensus {
             || (last_log_index >= last_log_info.last_log_index()
                 && last_log_term == last_log_info.last_log_term());
 
-        //TODO: avoid match statement
-        match condidate_id_matches && logs_uptodate {
-            true => {
-                self.vote_for(candidate);
+                if condidate_id_matches && logs_uptodate {
+                    self.vote_for(candidate);
+                    VoteResponse::granted(self.current_term())
+                } else {
+                    VoteResponse::not_granted(self.current_term())
+                }
 
-                return VoteResponse::granted(self.current_term());
-            }
-            false => {
-                return VoteResponse::not_granted(self.current_term());
-            }
-        };
     }
 
     fn count_votes(&mut self, votes: u64) {
-        //NOTE: we add one to the number of nodes to count ourself
-        let num_nodes = self.peers().len() + 1;
+        let num_nodes = self.peers().total_connected();
         let has_majority = votes > num_nodes.div_euclid(2) as u64;
         if has_majority || num_nodes.eq(&1) {
             self.become_leader();
-            tracing::info!("I am the leader now got {votes} votes for {num_nodes} nodes");
+            tracing::info!(action = "become leader", term = self.current_term(), votes=votes, peers=num_nodes);
         } else {
-            self.become_candidate();
-            tracing::info!("I still candidate now got {votes} votes for {num_nodes} nodes");
+            tracing::info!(action = "not enough votes", term = self.current_term(), votes=votes, peers=num_nodes);
         }
     }
 

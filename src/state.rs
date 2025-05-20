@@ -1,6 +1,7 @@
 use std::{
     cmp::Ordering,
     fmt::Debug,
+    io::BufWriter,
     net::SocketAddr,
     ops::{Deref, DerefMut},
     str::FromStr,
@@ -16,7 +17,7 @@ use crate::{
     client::{append_entries, create_client, vote},
     consensus::Consensus,
     dto::{CommandMsg, Entry, Operation, RaftMsg},
-    raft_capnp::raft,
+    raft_capnp::{self, raft},
     storage::{LogEntries, LogsInformation},
 };
 
@@ -62,11 +63,11 @@ impl Peer {
     async fn connect(addr: SocketAddr) -> raft::Client {
         tokio::task::spawn_local(async move {
             let mut counter = 0;
-            tracing::info!("trying to connect");
+            tracing::info!(action="adding peer", peer = addr.to_string());
             loop {
                 match create_client(&addr).await {
                     Ok(client) => {
-                        tracing::info!("connected");
+                        tracing::info!(action="peer connected", peer = addr.to_string());
                         break client;
                     }
                     Err(err) => {
@@ -89,19 +90,35 @@ impl Peer {
 }
 
 #[derive(Default, Debug, Clone)]
-pub struct Peers(Vec<Peer>);
+pub struct Peers{
+    connected: Vec<Peer>,
+    disconnected: Vec<Peer>
+}
+
+impl Peers {
+    pub fn disconnect(&mut self, index: usize) {
+        //TODO: add some awaking and background task mechanism to reconnect nodes
+        let peer = self.connected.remove(index);
+        self.disconnected.push(peer);
+    }
+
+    pub fn total_connected(&self) -> usize {
+                //NOTE: we add one to the number of nodes to count ourself
+        self.connected.len() + 1
+    }
+}
 
 impl Deref for Peers {
     type Target = Vec<Peer>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.connected
     }
 }
 
 impl DerefMut for Peers {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.connected
     }
 }
 
@@ -148,6 +165,50 @@ pub struct HardState {
     current_term: u64,
     voted_for: Option<NodeId>,
     log_entries: LogEntries,
+}
+
+impl HardState {
+    async fn save_to_disk(&self) -> Result<(), String> {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open("data/hard_state")
+            .expect("failed to open hard state file");
+
+        let write = BufWriter::new(file);
+
+        let mut message = capnp::message::Builder::new_default();
+
+        {
+            let mut hs_builder = message.init_root::<raft_capnp::hard_state::Builder>();
+            hs_builder.set_current_term(self.current_term);
+            let mut vote = hs_builder.reborrow().get_voted_for();
+
+            match self.voted_for {
+                None => {
+                    vote.set_none(());
+                }
+                Some(addr) => {
+                    let text = addr.0.to_string();
+                    vote.set_node_id(&text);
+                }
+            }
+
+            // log entries
+            let mut entries = hs_builder.init_log_entries(self.log_entries.len() as u32);
+            for (i, entry) in self.log_entries.iter().enumerate() {
+                let mut e = entries.reborrow().get(i as u32);
+                e.set_index(entry.index());
+                e.set_term(entry.term());
+                e.set_command(entry.command());
+            }
+        }
+
+        capnp::serialize_packed::write_message(write, &message).map_err(|err| {
+            tracing::error!("failed to write hard state to disk: {}", err);
+            err.to_string()
+        })
+    }
 }
 
 #[derive(Default, Debug)]
@@ -209,7 +270,7 @@ impl Consensus for State {
     fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
         self.hard_state.current_term = new_term;
         self.hard_state.voted_for = None;
-        self.soft_state.commit_index = 0;
+        // self.soft_state.commit_index = 0;
         self.leader = leader_id.map(NodeId::new);
     }
 
@@ -225,6 +286,7 @@ impl Consensus for State {
     }
 
     fn vote_for(&mut self, node: NodeId) {
+        tracing::info!(action="voting for", node = node.addr().to_string());
         self.hard_state.voted_for = Some(node);
     }
 
@@ -278,55 +340,74 @@ impl Node {
         self.state.peers.push(Peer::new(addr).await);
     }
 
+    async fn handle_command(&mut self, rpc: CommandMsg) {
+        match rpc {
+            CommandMsg::GetLeader(req) => {
+                let resp = self.state.leader();
+                //TODO: instead of sendig only the addr and creating the client on the server I
+                //should send the client in peers
+                let sender = req.sender;
+                if let Err(_) = sender.send(resp) {
+                    tracing::error!("Failed to send response in channel for get leader");
+                }
+            }
+            CommandMsg::Read(req) => {
+                // Handle read command
+            }
+            CommandMsg::Modify(req) => {
+                //TODO: when new operation:
+                // 1 save into the in memory logs
+                // 2 persist to disk
+                // 3 broadcast to all peers
+                // 4 when majority of peers have the log, apply to state machine
+                let current_term = self.state.current_term();
+                let log_entries = self.state.log_entries();
+                match req.msg {
+                    Operation::Create(data) => {
+                        //TODO: it would be cool to be able to serialize the whole command? how to
+                        //keep track of the commands in a better and easier way without copying all
+                        //the data so much?
+                        log_entries.new_entry(current_term, data.clone());
+                        self.state.hard_state.save_to_disk().await.unwrap();
+
+                        let log_entries = self.state.log_entries();
+                        if let Err(err) = log_entries.create(data.clone()).await {
+                            tracing::error!("Failed to create log entry {}", err);
+                        };
+                        let sender = req.sender;
+                        let entry = Entry {
+                            id: "hey".to_string(),
+                            data,
+                        };
+                        if sender.send(entry).is_err() {
+                            tracing::error!("Failed to send response in channel for create");
+                        }
+                    }
+                    Operation::Update(id, data) => {
+                        // Handle update command
+                    }
+                    Operation::Delete(id) => {
+                        // Handle delete command
+                    }
+                }
+            }
+        }
+    }
+
     pub async fn run(mut self) {
         let heartbeat_dur = Duration::from_secs_f64(self.heartbeat_interval);
         let election_dur = Duration::from_secs_f64(self.election_timeout);
         let mut heartbeat_interval = interval(heartbeat_dur);
         let mut election_timeout = Box::pin(sleep(election_dur));
-        let mut raft_channel = self.raft_channel;
-        let mut commands_channel = self.commands_channel;
 
         loop {
             tokio::select! {
                 //  Incoming RPCs from external users
-                Some(rpc) = commands_channel.recv() => {
-                    match rpc {
-                        CommandMsg::GetLeader(req) => {
-                            let resp = self.state.leader();
-                            let sender = req.sender;
-                            if let Err(_) = sender.send(resp){
-                                tracing::error!("Failed to send response in channel for get leader");
-                            }
-                        }
-                        CommandMsg::Read(req) => {
-                            // Handle read command
-                        }
-                        CommandMsg::Modify(req) => {
-                           match req.msg {
-                                Operation::Create(data) => {
-                                    let resp = self.state.log_entries().create(data.clone()).await;
-                                    let sender = req.sender;
-                                    if let Err(_) = sender.send(Entry {
-                                        id: "hey".to_string(),
-                                        data
-                                    }){
-                                        tracing::error!("Failed to send response in channel for create");
-                                    }
-                                }
-                                Operation::Update(id, data) => {
-                                    // Handle update command
-                                }
-                                Operation::Delete(id) => {
-                                    // Handle delete command
-                                }
-                            }
-                        }
-                    }
-
+                Some(rpc) = self.commands_channel.recv() => {
+                    self.handle_command(rpc).await;
                 }
 
-                Some(rpc) = raft_channel.recv() => {
-                    tracing::info!("electinos time resest {:?} ecause of rpc", election_timeout.deadline().elapsed());
+                Some(rpc) = self.raft_channel.recv() => {
                     election_timeout.as_mut().reset(Instant::now() + election_dur);
                     match rpc {
                         RaftMsg::AppendEntries(req) => {
@@ -364,16 +445,16 @@ impl Node {
 
                 //  election timeout fires → start election
                 _ = &mut election_timeout, if self.state.role != Role::Leader => {
-                    tracing::info!("electinos time put {:?}", election_timeout.deadline().elapsed());
                     election_timeout.as_mut().reset(Instant::now() + election_dur);
-                    tracing::info!("electinos time");
+                    tracing::info!(action="become candidate");
                     self.state.become_candidate();
+                    tracing::info!(action="send votes");
                     vote(&mut self.state).await;
                 }
 
                 //  heartbeat tick → send heartbeats if leader
                 _ = heartbeat_interval.tick(), if self.state.role == Role::Leader => {
-                    tracing::info!("sending heartbeats");
+                    tracing::info!(action="send heartbeat");
                     append_entries(&mut self.state, &[]).await;
                 }
             }

@@ -21,7 +21,6 @@ pub struct Server {
 
 impl Server {
     pub async fn run(self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
-        tracing::info!("server start");
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         let client: raft::Client = capnp_rpc::new_client(self);
         loop {
@@ -106,7 +105,7 @@ impl command::Server for Server {
         mut results: command::StartTransactionResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let channel = self.commands_channel.clone();
-        tracing::info!("start transaction *********************************************");
+        tracing::info!(action="start_transaction");
         Promise::from_future(async move {
             let (msg, rx) = CommandMsg::get_leader();
             channel.send(msg).await.expect("msg not sent");
@@ -125,7 +124,7 @@ impl command::Server for Server {
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let commands_channel = self.commands_channel.clone();
         let data = pry!(pry!(params.get()).get_data()).to_vec();
-        tracing::info!("create struct {:?}", String::from_utf8_lossy(data.as_slice()));
+        tracing::info!(action="create");
         Promise::from_future(async move {
             let (msg, rx) = CommandMsg::create(data);
             if let Err(err) = commands_channel.send(msg).await{
@@ -172,8 +171,7 @@ impl raft::Server for Server {
                 e.get_index(),
                 e.get_term(),
                 pry!(e.get_command())
-                    .to_string()
-                    .expect("error getting command as string"),
+                    .to_vec(),
             ));
         }
         let leader = pry!(pry!(request.get_leader_id()).to_str());
@@ -242,7 +240,6 @@ impl raft::Server for Server {
         mut results: raft::RequestVoteResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let request = pry!(params.get());
-        tracing::info!("the server received the request_vote {request:?}");
         let candidate_id = pry!(pry!(request.get_candidate_id()).to_string());
         let last_log_index = request.get_last_log_index();
         let last_log_term = request.get_last_log_term();

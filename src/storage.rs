@@ -1,17 +1,17 @@
 use std::{cmp::Ordering, fmt::Debug, ops::Deref};
 
 use tokio::fs::File;
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Debug, Eq)]
 pub struct LogEntry {
     index: u64,
     term: u64,
-    command: String,
+    command: Vec<u8>,
 }
 
 impl LogEntry {
-    pub fn new(index: u64, term: u64, command: String) -> Self {
+    pub fn new(index: u64, term: u64, command: Vec<u8>) -> Self {
         Self {
             index,
             term,
@@ -24,7 +24,7 @@ impl LogEntry {
     pub fn term(&self) -> u64 {
         self.term
     }
-    pub fn command(&self) -> &str {
+    pub fn command(&self) -> &[u8] {
         &self.command
     }
 }
@@ -98,10 +98,10 @@ impl LogEntries {
         self.last_log_info()
     }
 
-    // fn new_entry(&mut self, term: u64, command: String) {
-    //     let idx = self.last().map(|e| e.index + 1).unwrap_or_default();
-    //     self.0.push(LogEntry::new(idx, term, command))
-    // }
+    pub fn new_entry(&mut self, term: u64, command: Vec<u8>) {
+        let idx = self.last().map(|e| e.index + 1).unwrap_or_default();
+        self.0.push(LogEntry::new(idx, term, command))
+    }
 
     pub fn previous_log_entry_is_up_to_date(
         &self,
@@ -113,21 +113,15 @@ impl LogEntries {
         }
         match self.get(prev_log_index) {
             Some(log) => log.term.eq(&prev_log_term),
-
-            None => {
-                return false;
-            }
+            None => false,
         }
     }
 
-
-    pub async fn create(&mut self, data: Vec<u8>)->Result<(), String> {
+    pub async fn create(&mut self, data: Vec<u8>) -> Result<(), String> {
         let mut file = File::open("data/table_1").await.unwrap();
-
-        file.write(&data).await.unwrap();
-file.flush();
+        file.write_all(&data).await.unwrap();
+        let _ = file.flush().await;
         Ok(())
-
     }
 }
 

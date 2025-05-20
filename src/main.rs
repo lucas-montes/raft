@@ -55,6 +55,7 @@ let _enter = span.enter();
         .run_until(async move {
             let heartbeat_interval = random_range(1.0..2.9);
             let election_timeout = random_range(3.0..6.0);
+            //TODO: when starting a new node (or restarting) read the state from disk
             let state = State::new(NodeId::new(cli.addr.clone()));
             let (rtx, rrx) = tokio::sync::mpsc::channel(100);
             let (ctx, crx) = tokio::sync::mpsc::channel(100);

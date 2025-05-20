@@ -132,7 +132,7 @@ async fn manage_append_entries_tasks<S: Consensus>(
         if let AppendEntriesResponse::Err(term) = append_entries_response {
             //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
             state.become_follower(None, term);
-            tracing::info!("im a follower now so i do not send more hearbeats");
+            tracing::info!(action="become_follower", term = term);
             break;
         };
     }
@@ -221,6 +221,7 @@ async fn manage_vote_tasks<S: Consensus>(
     //NOTE: we start with one vote because we vote for ourself
     let mut votes = 1;
     while let Some(res) = tasks.join_next().await {
+        //TODO: make it better, extract the request creation so it can be reused and a new task added to the list if it fails
         match res.expect("why joinhandle failed?") {
             Ok(r) => {
                 votes += r.vote_granted() as u64;
@@ -231,7 +232,6 @@ async fn manage_vote_tasks<S: Consensus>(
             }
         }
     }
-    tracing::info!("counting votes");
     state.count_votes(votes);
 }
 

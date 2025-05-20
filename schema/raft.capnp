@@ -71,11 +71,23 @@ struct VoteResponse {
 struct LogEntry {
   index @0 :UInt64;
   term @1:UInt64;
-  command @2 :Text;
+  command @2 :Data;
 }
 
 struct Peer {
   id @0 :Text;
   address @1 :Text;
   client @2 :Raft;
+}
+
+struct HardState {
+  currentTerm @0 : UInt64;
+
+  # votedFor is optional: either `none` or a text‐encoded NodeId ("ip:port")
+  votedFor : union {
+    none   @1 : Void;
+    nodeId @2 : Text;
+  }
+
+  logEntries  @3 : List(LogEntry);
 }
