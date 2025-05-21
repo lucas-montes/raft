@@ -4,6 +4,7 @@ use std::{
     io::BufWriter,
     net::SocketAddr,
     ops::{Deref, DerefMut},
+    path::PathBuf,
     str::FromStr,
     time::Duration,
 };
@@ -12,7 +13,7 @@ use crate::{
     client::create_client,
     consensus::Consensus,
     raft_capnp::{self, raft},
-    storage::{LogEntries, LogsInformation},
+    storage::{LogEntries, LogEntry, LogsInformation},
 };
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -159,11 +160,11 @@ pub struct HardState {
     current_term: u64,
     voted_for: Option<NodeId>,
     log_entries: LogEntries,
-    file_path: String,
+    file_path: PathBuf,
 }
 
 impl HardState {
-    fn new(file_path: String) -> Self {
+    fn new(file_path: PathBuf) -> Self {
         Self {
             file_path,
             ..Default::default()
@@ -209,6 +210,86 @@ impl HardState {
             err.to_string()
         })
     }
+
+    fn load_from_disk(&mut self) -> Result<(), String> {
+        std::fs::create_dir_all(self.file_path.parent().expect("couldnt get parent of path")).expect("couldnt creat parent dir for hard state");
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .truncate(false)
+            .create(true)
+            .open(&self.file_path)
+            .expect("failed to open hard state file");
+
+        let reader = std::io::BufReader::new(file);
+
+        let message_reader = match capnp::serialize_packed::read_message(reader, capnp::message::ReaderOptions::new()){
+            Ok(message_reader) => message_reader,
+            Err(err) => {
+                match err.kind{
+                    capnp::ErrorKind::PrematureEndOfFile => {
+                        tracing::info!("hard state file is empty, creating new one");
+                        return Ok(());
+                    }
+                    _ => {
+                        tracing::error!("failed to read hard state message: {}", err);
+                        tracing::error!("failed to read hard state message: {}", err.kind);
+                        return Err(err.to_string());
+                    }
+                }
+            }
+        };
+
+        let hs_reader = message_reader
+            .get_root::<raft_capnp::hard_state::Reader>()
+            .map_err(|e| {
+                tracing::error!("failed to get hard state root: {}", e);
+                e.to_string()
+            })?;
+
+        self.current_term = hs_reader.get_current_term();
+        match hs_reader.get_voted_for().which() {
+            Ok(raft_capnp::hard_state::voted_for::None(())) => self.voted_for = None,
+            Ok(raft_capnp::hard_state::voted_for::NodeId(node_id)) => match node_id {
+                Ok(node_id) => {
+                    let addr = SocketAddr::from_str(node_id.to_str().unwrap()).map_err(|e| {
+                        tracing::error!("failed to parse NodeId from string: {}", e);
+                        e.to_string()
+                    })?;
+                    self.voted_for = Some(NodeId(addr));
+                }
+                Err(e) => {
+                    tracing::error!("failed to parse NodeId from string: {}", e);
+                    return Err(e.to_string());
+                }
+            },
+
+            Err(e) => {
+                tracing::error!("failed to read voted_for: {}", e);
+                return Err(e.to_string());
+            }
+        }
+
+        let entries_reader = hs_reader.get_log_entries().map_err(|e| {
+            tracing::error!("failed to get log entries: {}", e);
+            e.to_string()
+        })?;
+
+        self.log_entries = entries_reader
+            .iter()
+            .map(|e| {
+                LogEntry::new(
+                    e.get_index(),
+                    e.get_term(),
+                    e.get_command()
+                        .map_err(|err| err.to_string())
+                        .expect("config loading failed")
+                        .to_vec(),
+                )
+            })
+            .collect();
+        Ok(())
+    }
 }
 
 #[derive(Default, Debug)]
@@ -235,10 +316,16 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(id: NodeId) -> Self {
+    pub fn new(id: NodeId, path: &str) -> Self {
+        let mut path = PathBuf::from(path);
+        path.push(id.addr().to_string().replace(":", "_"));
+        let mut hard_state = HardState::new(path);
+        hard_state
+            .load_from_disk()
+            .expect("hard config load failed");
         Self {
             id,
-            hard_state: HardState::new(format!("data/state/{}", id.addr())),
+            hard_state,
             ..Default::default()
         }
     }

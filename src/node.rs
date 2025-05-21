@@ -58,6 +58,7 @@ impl Node {
                 // 2 persist to disk
                 // 3 broadcast to all peers
                 // 4 when majority of peers have the log, apply to state machine
+                let id = self.state.id().addr().to_string();
                 let current_term = self.state.current_term();
                 let log_entries = self.state.log_entries();
                 match req.msg {
@@ -69,7 +70,7 @@ impl Node {
                         self.state.commit_hard_state().await;
 
                         let log_entries = self.state.log_entries();
-                        if let Err(err) = log_entries.create(data.clone()).await {
+                        if let Err(err) = log_entries.create(data.clone(), id.as_str()).await {
                             tracing::error!("Failed to create log entry {}", err);
                         };
                         let sender = req.sender;
@@ -97,6 +98,9 @@ impl Node {
         let election_dur = Duration::from_secs_f64(self.election_timeout);
         let mut heartbeat_interval = interval(heartbeat_dur);
         let mut election_timeout = Box::pin(sleep(election_dur));
+
+        let last_log_info = self.state.last_log_info();
+        tracing::info!(action="starting", term=%self.state.current_term(), last_log_index=last_log_info.last_log_index(), last_log_term=last_log_info.last_log_term());
 
         loop {
             tokio::select! {

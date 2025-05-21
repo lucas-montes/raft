@@ -117,8 +117,16 @@ impl LogEntries {
         }
     }
 
-    pub async fn create(&mut self, data: Vec<u8>) -> Result<(), String> {
-        let mut file = File::open("data/table_1").await.unwrap();
+    pub async fn create(&mut self, data: Vec<u8>, p: &str) -> Result<(), String> {
+        std::fs::create_dir_all("data/table").expect("couldnt creat parent dir for hard state");
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .append(true)
+            .truncate(false)
+            .create(true)
+            .open(&format!("data/table/{}", p)).await
+            .expect("failed to open storage file");
+
         file.write_all(&data).await.unwrap();
         let _ = file.flush().await;
         Ok(())
@@ -130,5 +138,11 @@ impl Deref for LogEntries {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl FromIterator<LogEntry> for LogEntries {
+    fn from_iter<T: IntoIterator<Item = LogEntry>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
     }
 }

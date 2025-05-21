@@ -67,7 +67,7 @@ async fn main() {
             let server = Server::new(rtx, ctx);
             let server_task = tokio::task::spawn_local(server.run(cli.addr));
 
-            let mut state = State::new(NodeId::new(cli.addr.clone()));
+            let mut state = State::new(NodeId::new(cli.addr.clone()), "data/state");
 
             for node in nodes {
                 state.add_peer(node).await;
