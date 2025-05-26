@@ -2,17 +2,25 @@
 const ws = new WebSocket('ws://localhost:3000/ws');
 
 // Store cluster state
-let nodes = {}; // { node_id: { role, term, commit_index, x, y, status, name } }
+let nodes = {}; // { node_id: { role, term, commit_index, x, y, status, addr } }
 let serverLogs = []; // Store server log messages
+let messageAnimations = []; // Store active message animations
 
 // Canvas for message animations
-const canvas = document.getElementById('message-canvas');
-const ctx = canvas.getContext('2d');
+let canvas, ctx;
+
+// Initialize canvas after DOM loads
+document.addEventListener('DOMContentLoaded', () => {
+    canvas = document.getElementById('message-canvas');
+    ctx = canvas.getContext('2d');
+    resizeCanvas();
+    startAnimationLoop();
+});
 
 // WebSocket event handlers
 ws.onopen = () => {
     console.log('Connected to backend');
-    document.getElementById('status').textContent = 'Connected';
+    updateConnectionStatus('Connected');
 };
 
 ws.onmessage = (event) => {
@@ -28,19 +36,20 @@ ws.onmessage = (event) => {
 
 ws.onerror = (error) => {
     console.error('WebSocket error:', error);
-    document.getElementById('status').textContent = 'Error: Disconnected';
+    updateConnectionStatus('Error: Disconnected');
 };
 
 ws.onclose = () => {
-    document.getElementById('status').textContent = 'Disconnected';
+    updateConnectionStatus('Disconnected');
 };
 
 // Handle server log messages from backend
 function handleServerLog(logData) {
     const { action, timestamp, span } = logData;
 
+
     if (!action || !span) {
-        console.error('Invalid log data:', logEntry);
+        console.error('Invalid log data:', logData);
         return;
     }
 
@@ -63,8 +72,7 @@ function handleServerLog(logData) {
     // Handle specific actions for node state updates
     switch (action) {
         case 'starting':
-            // Initialize node when it starts
-            initializeNodeFromLog(span.addr, span.name);
+            initializeNodeFromLog(span.addr);
             break;
         case 'becomeLeader':
             updateNodeFromLog(span.addr, 'leader');
@@ -76,8 +84,14 @@ function handleServerLog(logData) {
             updateNodeFromLog(span.addr, 'candidate');
             break;
         case 'sendAppendEntries':
+            animateMessage(span.addr, null, 'append');
+            break;
         case 'sendHeartbeat':
+            animateMessage(span.addr, null, 'heartbeat');
+            break;
         case 'sendVotes':
+            animateMessage(span.addr, null, 'vote');
+            break;
         case 'receiveAppendEntries':
         case 'receiveVote':
         case 'startTransaction':
@@ -92,7 +106,7 @@ function handleServerLog(logData) {
 // Update node role based on server logs
 function updateNodeFromLog(addr, role) {
     if (!nodes[addr]) {
-        initializeNodeFromLog(addr, addr);
+        initializeNodeFromLog(addr);
     }
     nodes[addr].role = role;
     renderNodes();
@@ -100,11 +114,17 @@ function updateNodeFromLog(addr, role) {
 }
 
 // Initialize a new node from log data
-function initializeNodeFromLog(addr, name) {
+function initializeNodeFromLog(addr) {
     if (!nodes[addr]) {
-        // Generate random position for new nodes
-        const x = Math.random() * 400 + 50;
-        const y = Math.random() * 300 + 50;
+        // Calculate position in a circle for better layout
+        const nodeCount = Object.keys(nodes).length;
+        const angle = (nodeCount * 2 * Math.PI) / Math.max(5, nodeCount + 1);
+        const centerX = 300;
+        const centerY = 200;
+        const radius = 120;
+
+        const x = centerX + Math.cos(angle) * radius;
+        const y = centerY + Math.sin(angle) * radius;
 
         nodes[addr] = {
             role: 'follower',
@@ -113,7 +133,7 @@ function initializeNodeFromLog(addr, name) {
             x: x,
             y: y,
             status: 'active',
-            name: name
+            addr: addr
         };
         renderNodes();
         updateRemoveNodeOptions();
@@ -121,35 +141,120 @@ function initializeNodeFromLog(addr, name) {
     }
 }
 
-// Render server logs in UI
-function renderServerLogs() {
-    let serverLogsDiv = document.getElementById('server-logs');
+// Animate message between nodes
+function animateMessage(fromAddr, toAddr, messageType) {
+    const fromNode = nodes[fromAddr];
+    if (!fromNode) return;
 
-    // Create the server logs container if it doesn't exist
-    if (!serverLogsDiv) {
-        serverLogsDiv = document.createElement('div');
-        serverLogsDiv.id = 'server-logs';
-        serverLogsDiv.className = 'server-logs-container';
-
-        // Insert after the status div
-        const statusDiv = document.getElementById('status');
-        if (statusDiv && statusDiv.parentNode) {
-            statusDiv.parentNode.insertBefore(serverLogsDiv, statusDiv.nextSibling);
-        } else {
-            document.body.appendChild(serverLogsDiv);
+    // If no specific target, send to all other nodes
+    if (!toAddr) {
+        Object.keys(nodes).forEach(addr => {
+            if (addr !== fromAddr) {
+                createMessageAnimation(fromNode, nodes[addr], messageType);
+            }
+        });
+    } else {
+        const toNode = nodes[toAddr];
+        if (toNode) {
+            createMessageAnimation(fromNode, toNode, messageType);
         }
     }
+}
 
-    serverLogsDiv.innerHTML = '<h3>Server Logs</h3>';
+// Create a single message animation
+function createMessageAnimation(fromNode, toNode, messageType) {
+    const message = {
+        startX: fromNode.x + 40,
+        startY: fromNode.y + 40,
+        endX: toNode.x + 40,
+        endY: toNode.y + 40,
+        currentX: fromNode.x + 40,
+        currentY: fromNode.y + 40,
+        type: messageType,
+        progress: 0,
+        duration: 1000, // 1 second
+        startTime: Date.now()
+    };
+
+    messageAnimations.push(message);
+}
+
+// Animation loop
+function startAnimationLoop() {
+    function animate() {
+        if (ctx && canvas) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const currentTime = Date.now();
+            messageAnimations = messageAnimations.filter(message => {
+                const elapsed = currentTime - message.startTime;
+                message.progress = Math.min(elapsed / message.duration, 1);
+
+                // Easing function for smooth animation
+                const easeProgress = 1 - Math.pow(1 - message.progress, 3);
+
+                message.currentX = message.startX + (message.endX - message.startX) * easeProgress;
+                message.currentY = message.startY + (message.endY - message.startY) * easeProgress;
+
+                // Draw message ball
+                ctx.beginPath();
+                ctx.arc(message.currentX, message.currentY, 6, 0, 2 * Math.PI);
+
+                switch (message.type) {
+                    case 'vote':
+                        ctx.fillStyle = '#ffc107';
+                        ctx.shadowColor = '#ffc107';
+                        break;
+                    case 'append':
+                        ctx.fillStyle = '#20c997';
+                        ctx.shadowColor = '#20c997';
+                        break;
+                    case 'heartbeat':
+                        ctx.fillStyle = '#007bff';
+                        ctx.shadowColor = '#007bff';
+                        break;
+                    default:
+                        ctx.fillStyle = '#6c757d';
+                        ctx.shadowColor = '#6c757d';
+                }
+
+                ctx.shadowBlur = 10;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                return message.progress < 1;
+            });
+        }
+
+        requestAnimationFrame(animate);
+    }
+    animate();
+}
+
+// Render server logs in UI
+function renderServerLogs() {
+    const serverLogsDiv = document.getElementById('server-logs');
+    if (!serverLogsDiv) return;
+
+    // Keep the header and create/update content
+    const existingHeader = serverLogsDiv.querySelector('h3');
+    serverLogsDiv.innerHTML = '';
+    if (existingHeader) {
+        serverLogsDiv.appendChild(existingHeader);
+    } else {
+        const header = document.createElement('h3');
+        header.textContent = 'Server Logs';
+        serverLogsDiv.appendChild(header);
+    }
 
     // Show most recent logs first
-    const recentLogs = serverLogs.slice(-20).reverse();
+    const recentLogs = serverLogs.slice(-50).reverse();
 
     recentLogs.forEach(log => {
         const logDiv = document.createElement('div');
         logDiv.className = `server-log-entry ${log.action.toLowerCase()}`;
 
-        // Parse timestamp if it's a string
+        // Parse timestamp
         let timeDisplay = log.timestamp;
         try {
             const date = new Date(log.timestamp);
@@ -161,7 +266,7 @@ function renderServerLogs() {
         logDiv.innerHTML = `
             <span class="timestamp">${timeDisplay}</span>
             <span class="action">${log.action}</span>
-            <span class="node">${log.name}</span>
+            <span class="node-addr">${log.addr}</span>
         `;
         serverLogsDiv.appendChild(logDiv);
     });
@@ -172,22 +277,29 @@ function renderNodes() {
     const nodesDiv = document.getElementById('nodes');
     if (!nodesDiv) return;
 
-    nodesDiv.innerHTML = '<canvas id="message-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></canvas>';
+    // Clear existing nodes but keep canvas
+    const existingCanvas = nodesDiv.querySelector('#message-canvas');
+    nodesDiv.innerHTML = '';
+    if (existingCanvas) {
+        nodesDiv.appendChild(existingCanvas);
+    }
 
     Object.entries(nodes).forEach(([id, node]) => {
         const div = document.createElement('div');
         div.className = `node ${node.role} ${node.status === 'joining' ? 'joining' : ''}`;
         div.style.left = node.x + 'px';
         div.style.top = node.y + 'px';
-        div.textContent = `${node.name || id} (${node.role})`;
+        div.textContent = node.addr;
+        div.title = `${node.addr} - ${node.role.toUpperCase()}`;
         nodesDiv.appendChild(div);
     });
+}
 
-    // Update canvas reference after re-creating it
-    const newCanvas = document.getElementById('message-canvas');
-    if (newCanvas) {
-        newCanvas.width = nodesDiv.clientWidth;
-        newCanvas.height = nodesDiv.clientHeight;
+// Update connection status
+function updateConnectionStatus(status) {
+    const statusDiv = document.getElementById('status');
+    if (statusDiv) {
+        statusDiv.textContent = status;
     }
 }
 
@@ -209,11 +321,11 @@ function updateRemoveNodeOptions() {
     const select = document.getElementById('remove-node-select');
     if (!select) return;
 
-    select.innerHTML = '<option value="">Select node</option>';
+    select.innerHTML = '<option value="">Select node to remove</option>';
     Object.keys(nodes).forEach(id => {
         const option = document.createElement('option');
         option.value = id;
-        option.textContent = `${nodes[id].name || id} (${id})`;
+        option.textContent = id;
         select.appendChild(option);
     });
 }
@@ -249,6 +361,7 @@ if (removeNodeBtn) {
     });
 }
 
+
 // Initialize canvas size
 function resizeCanvas() {
     const canvas = document.getElementById('message-canvas');
@@ -261,5 +374,7 @@ function resizeCanvas() {
 
 window.addEventListener('resize', resizeCanvas);
 // Initial setup
-resizeCanvas();
-updateStatus();
+document.addEventListener('DOMContentLoaded', () => {
+    resizeCanvas();
+    updateStatus();
+});
