@@ -148,15 +148,15 @@ impl Node {
                 //  election timeout fires → start election
                 _ = &mut election_timeout, if self.state.role() != Role::Leader => {
                     election_timeout.as_mut().reset(Instant::now() + election_dur);
-                    tracing::info!(action="become candidate");
+                    tracing::info!(action="becomeCandidate");
                     self.state.become_candidate();
-                    tracing::info!(action="send votes");
+                    tracing::info!(action="sendVotes");
                     vote(&mut self.state).await;
                 }
 
                 //  heartbeat tick → send heartbeats if leader
                 _ = heartbeat_interval.tick(), if self.state.role() == Role::Leader => {
-                    tracing::info!(action="send heartbeat");
+                    tracing::info!(action="sendHeartbeat");
                     append_entries(&mut self.state, &[]).await;
                 }
             }

@@ -212,7 +212,8 @@ impl HardState {
     }
 
     fn load_from_disk(&mut self) -> Result<(), String> {
-        std::fs::create_dir_all(self.file_path.parent().expect("couldnt get parent of path")).expect("couldnt creat parent dir for hard state");
+        std::fs::create_dir_all(self.file_path.parent().expect("couldnt get parent of path"))
+            .expect("couldnt creat parent dir for hard state");
         let file = std::fs::OpenOptions::new()
             .read(true)
             .append(true)
@@ -223,21 +224,22 @@ impl HardState {
 
         let reader = std::io::BufReader::new(file);
 
-        let message_reader = match capnp::serialize_packed::read_message(reader, capnp::message::ReaderOptions::new()){
+        let message_reader = match capnp::serialize_packed::read_message(
+            reader,
+            capnp::message::ReaderOptions::new(),
+        ) {
             Ok(message_reader) => message_reader,
-            Err(err) => {
-                match err.kind{
-                    capnp::ErrorKind::PrematureEndOfFile => {
-                        tracing::info!("hard state file is empty, creating new one");
-                        return Ok(());
-                    }
-                    _ => {
-                        tracing::error!("failed to read hard state message: {}", err);
-                        tracing::error!("failed to read hard state message: {}", err.kind);
-                        return Err(err.to_string());
-                    }
+            Err(err) => match err.kind {
+                capnp::ErrorKind::PrematureEndOfFile => {
+                    tracing::info!("hard state file is empty, creating new one");
+                    return Ok(());
                 }
-            }
+                _ => {
+                    tracing::error!("failed to read hard state message: {}", err);
+                    tracing::error!("failed to read hard state message: {}", err.kind);
+                    return Err(err.to_string());
+                }
+            },
         };
 
         let hs_reader = message_reader
@@ -382,7 +384,7 @@ impl Consensus for State {
     }
 
     fn vote_for(&mut self, node: NodeId) {
-        tracing::info!(action = "voting for", node = node.addr().to_string());
+        tracing::info!(action = "votingFor", node = node.addr().to_string());
         self.hard_state.voted_for = Some(node);
     }
 

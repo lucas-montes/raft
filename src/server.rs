@@ -111,7 +111,7 @@ impl command::Server for Server {
         mut results: command::StartTransactionResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let channel = self.commands_channel.clone();
-        tracing::info!(action = "start_transaction");
+        tracing::info!(action = "startTransaction");
         Promise::from_future(async move {
             let (msg, rx) = CommandMsg::get_leader();
             channel.send(msg).await.expect("msg not sent");

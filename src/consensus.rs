@@ -35,7 +35,7 @@ pub trait Consensus {
         entries: Vec<LogEntry>,
     ) -> AppendEntriesResult {
         tracing::info!(
-            action = "receive append entries",
+            action = "receiveAppendEntries",
             term = term,
             leader = leader_id,
             prev_log_index = prev_log_index,
@@ -86,7 +86,7 @@ pub trait Consensus {
         last_log_term: u64,
     ) -> VoteResponse {
         tracing::info!(
-            action = "receive vote",
+            action = "receiveVote",
             term = term,
             candidate = candidate_id,
             last_log_index = last_log_index,
@@ -129,14 +129,14 @@ pub trait Consensus {
         if has_majority || num_nodes.eq(&1) {
             self.become_leader();
             tracing::info!(
-                action = "become leader",
+                action = "becomeLeader",
                 term = self.current_term(),
                 votes = votes,
                 peers = num_nodes
             );
         } else {
             tracing::info!(
-                action = "not enough votes",
+                action = "notEnoughVotes",
                 term = self.current_term(),
                 votes = votes,
                 peers = num_nodes

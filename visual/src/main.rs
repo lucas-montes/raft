@@ -1,33 +1,127 @@
-use askama::Template;
 use axum::{
-    body::Bytes,
-    extract::{
-        ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
-        State,
-    },
-    http::StatusCode,
-    response::{Html, IntoResponse, Response},
-    routing::{any, get},
     Router,
+    extract::{
+        State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
+    response::IntoResponse,
+    routing::any,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+
 use tokio::{
     io::AsyncBufReadExt,
     process::{Child, Command},
-    sync::RwLock,
+    sync::{
+        RwLock,
+        mpsc::{self, Sender},
+    },
 };
 
-use std::{collections::HashMap, ops::ControlFlow, process::Stdio, sync::Arc};
+use std::{collections::HashMap, process::Stdio, sync::Arc};
 use std::{net::SocketAddr, path::PathBuf};
 use tower_http::services::ServeDir;
 
 //allows to extract the IP of connecting user
 use axum::extract::connect_info::ConnectInfo;
-use axum::extract::ws::CloseFrame;
 
 //allows to split the websocket stream into separate TX and RX branches
 use futures::{sink::SinkExt, stream::StreamExt};
+
+#[derive(Clone)]
+struct ClusterState {
+    nodes: Arc<RwLock<HashMap<String, NodeInfo>>>,
+    front_transmission: Option<Sender<ServerLogType>>,
+}
+
+struct NodeInfo {
+    address: String,
+    port: String,
+    process: Child,
+}
+
+fn app() -> Router {
+    let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates");
+
+    let state = ClusterState {
+        nodes: Arc::new(RwLock::new(HashMap::new())),
+        front_transmission: None,
+    };
+
+    Router::new()
+        .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
+        .route("/ws", any(ws_handler))
+        .with_state(state)
+}
+
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<ClusterState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_socket(socket, addr, state))
+}
+
+async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterState) {
+    println!("socketing");
+    let (mut socket_sender, mut socket_receiver) = socket.split();
+
+    let (tx, mut rx) = mpsc::channel(100);
+
+    state.front_transmission = Some(tx);
+    let state2 = state.clone();
+
+    let mut command_task = tokio::spawn(async move {
+        while let Some(Ok(msg)) = socket_receiver.next().await {
+            if let Message::Text(text) = msg {
+                match serde_json::from_str::<FrontendCommand>(&text) {
+                    Ok(cmd) => match cmd {
+                        FrontendCommand::AddNode { addr, port } => {
+                            spawn_node(port, addr, &state).await;
+                        }
+                        FrontendCommand::RemoveNode { id } => {
+                            remove_node(id, &state).await;
+                        }
+                    },
+                    Err(e) => {
+                        println!("Error parsing command: {:?}", e);
+                    }
+                }
+            }
+        }
+    });
+
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            let msg = match serde_json::to_string(&msg) {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("Error serializing message: {:?}", e);
+                    continue;
+                }
+            };
+
+            // Send the message to the WebSocket
+            if let Err(err) = socket_sender.send(msg.into()).await {
+                println!("Error sending message to socket: {:?}", err);
+            }
+        }
+    });
+
+
+    //TODO: delete once the tests finished
+    for addr in 0..3{
+        let port = (4000 + addr).to_string();
+        spawn_node(port, "127.0.0.1".into(), &state2).await;
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "camelCase")]
+enum FrontendCommand {
+    AddNode { addr: String, port: String },
+    RemoveNode { id: String },
+}
 
 #[tokio::main]
 async fn main() {
@@ -46,120 +140,33 @@ async fn main() {
     .unwrap();
 }
 
-fn app() -> Router {
-    let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates");
-    let state = ClusterState {
-        nodes: Arc::new(RwLock::new(HashMap::new())),
-        // telemetry: Arc::new(RwLock::new(HashMap::new())),
-    };
-
-    Router::new()
-        .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
-        .route("/ws", any(ws_handler))
-        .with_state(state)
+#[derive(Serialize, Deserialize)]
+struct ServerLogSpan {
+    addr: String,
+    name: String,
 }
 
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<ClusterState>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, addr, state))
-}
-
-async fn handle_socket(socket: WebSocket, who: SocketAddr, state: ClusterState) {
-    println!("socketing");
-    let (mut sender, mut receiver) = socket.split();
-
-    // Telemetry streaming task
-    let telemetry_state = state.clone();
-    let mut telemetry_task = tokio::spawn(async move {
-        loop {
-            // let telemetry = telemetry_state.telemetry.read().await;
-            // for (node_id, telem) in telemetry.iter() {
-            //     let msg = TelemetryMessage {
-            //         event: TelemetryEvent::StateChange {
-            //             node_id: node_id.clone(),
-            //             role: telem.role.clone(),
-            //             term: telem.term,
-            //             commit_index: telem.commit_index,
-            //         },
-            //     };
-            //     if sender.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() {
-            //         return;
-            //     }
-            // }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    });
-
-    // Command processing task
-    let command_state = state.clone();
-    let mut command_task = tokio::spawn(async move {
-        while let Some(Ok(msg)) = receiver.next().await {
-            if let Message::Text(text) = msg {
-                println!("{:?}", &text);
-                match serde_json::from_str::<FrontendCommand>(&text) {
-                    Ok(cmd) => {
-                        process_command(cmd, who, &command_state).await;
-                    }
-                    Err(e) => {
-                        println!("Error parsing command: {:?}", e);
-                    }
-                }
-            }
-        }
-    });
-
-    // Abort tasks if either exits
-    tokio::select! {
-        _ = (&mut telemetry_task) => command_task.abort(),
-        _ = (&mut command_task) => telemetry_task.abort(),
-    }
-}
-
-async fn process_command(cmd: FrontendCommand, who: SocketAddr, state: &ClusterState) {
-    match cmd {
-        FrontendCommand::GetState => {
-            let nodes = state.nodes.read().await;
-            // let telemetry = state.telemetry.read().await;
-            // let msg = TelemetryMessage {
-            //     event: TelemetryEvent::StateChange {
-            //         node_id: "".to_string(),
-            //         role: NodeRole::Leader, // Placeholder
-            //         term: 0,
-            //         commit_index: 0,
-            //     },
-            // };
-            // Send state via WebSocket
-        }
-        FrontendCommand::AddNode { addr, port } => {
-            spawn_node(port, addr, state).await;
-        }
-        FrontendCommand::RemoveNode { id } => {
-            remove_node(id, state).await;
-        }
-    }
+#[derive(Serialize, Deserialize)]
+struct ServerLog {
+    timestamp: String,
+    span: ServerLogSpan,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "camelCase")]
-enum FrontendCommand {
-    GetState,
-    AddNode { addr: String, port: String },
-    RemoveNode { id: String },
-}
-
-#[derive(Clone)]
-struct ClusterState {
-    nodes: Arc<RwLock<HashMap<String, NodeInfo>>>,
-    // telemetry: Arc<RwLock<HashMap<String, NodeTelemetry>>>,
-}
-
-struct NodeInfo {
-    address: String,
-    port: String,
-    process: Child,
+enum ServerLogType {
+    Starting(ServerLog),
+    SendAppendEntries(ServerLog),
+    SendHeartbeat(ServerLog),
+    SendVotes(ServerLog),
+    StartTransaction(ServerLog),
+    VotingFor(ServerLog),
+    Create(ServerLog),
+    ReceiveAppendEntries(ServerLog),
+    ReceiveVote(ServerLog),
+    BecomeCandidate(ServerLog),
+    BecomeFollower(ServerLog),
+    BecomeLeader(ServerLog),
 }
 
 async fn spawn_node(port: String, address: String, state: &ClusterState) {
@@ -176,12 +183,21 @@ async fn spawn_node(port: String, address: String, state: &ClusterState) {
         .spawn()
         .unwrap();
     let stdout = cmd.stdout.take().unwrap();
-    let a = full_addr.clone();
+    let rx = state.front_transmission.clone().unwrap();
     tokio::spawn(async move {
         let reader = tokio::io::BufReader::new(stdout);
         let mut lines = reader.lines();
         while let Some(line) = lines.next_line().await.unwrap() {
-            println!("raft node {}: {}", a, line);
+            match serde_json::from_str::<ServerLogType>(&line) {
+                Ok(cmd) => {
+                    if let Err(err) = rx.send(cmd).await {
+                        println!("Error sending message to frontend");
+                    }
+                }
+                Err(e) => {
+                    println!("Error parsing log: {:?} ; {:?}", e, line);
+                }
+            }
         }
     });
 
