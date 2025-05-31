@@ -4,24 +4,44 @@ use std::net::SocketAddr;
 use tokio::task::JoinSet;
 
 use crate::{
-    consensus::Consensus,
-    dto::{AppendEntriesResponse, VoteResponse},
-    raft_capnp::{command, raft},
-    storage::LogEntry,
+    consensus::Consensus, dto::{AppendEntriesResponse, VoteResponse},  peers::{ Peers, PeersManagement }, raft_capnp::{command, raft}, storage::LogEntry
 };
+
+
+pub trait RaftClient {
+    fn create_vote_request(&self)->VoteRequest;
+    fn create_append_entries_request(&self)->AppendEntriesRequest;
+    fn peers(&self)->&Peers;
+}
+
+struct AppendEntriesRequest {
+    term: u64,
+    leader_id: String,
+    prev_log_index: u64,
+    prev_log_term: u64,
+    leader_commit: u64,
+}
+struct VoteRequest {
+    term: u64,
+    candidate_id: String,
+    last_log_index: u64,
+    last_log_term: u64,
+}
+
 
 struct RequestError {
     index: usize,
     error: capnp::Error,
 }
 
-pub async fn append_entries<S: Consensus>(state: &mut S, entries: &[LogEntry]) {
-    let tasks = prepare_append_entries_tasks(state, entries).await;
-    manage_append_entries_tasks(state, tasks).await;
+pub async fn append_entries<S: Consensus + PeersManagement>(state: &S,peers: &Peers, entries: &[LogEntry]) -> Result<SuccessfulAppendEntriesResult, FailureAppendEntriesResult> {
+    let tasks = prepare_append_entries_tasks(state, peers, entries).await;
+    manage_append_entries_tasks(tasks).await
 }
 
-async fn prepare_append_entries_tasks<S: Consensus>(
-    state: &mut S,
+async fn prepare_append_entries_tasks<S: Consensus + PeersManagement >(
+    state: &S,
+    peers: &Peers,
     entries: &[LogEntry],
 ) -> JoinSet<Result<AppendEntriesResponse, RequestError>> {
     let mut tasks = JoinSet::new();
@@ -31,7 +51,7 @@ async fn prepare_append_entries_tasks<S: Consensus>(
     let last_log_info = state.last_log_info();
     // let mut m = capnp::message::Builder::new_default();
 
-    for (index, peer) in state.peers().iter().enumerate() {
+    for (index, peer) in peers.iter().enumerate() {
         let client = peer.client();
 
         let mut request = client.append_entries_request();
@@ -109,10 +129,39 @@ async fn send_append_entries(
     }
 }
 
-async fn manage_append_entries_tasks<S: Consensus>(
-    state: &mut S,
+
+pub struct FailureAppendEntriesResult{
+    higher_term: u64,
+    failed_peers: Vec<usize>
+}
+impl FailureAppendEntriesResult {
+    pub fn higher_term(&self) -> u64 {
+        self.higher_term
+    }
+    pub fn failed_peers(&self) -> &[usize] {
+        &self.failed_peers
+    }
+}
+pub struct SuccessfulAppendEntriesResult
+{
+    appends_succesful: u64,
+    failed_peers: Vec<usize>
+}
+impl SuccessfulAppendEntriesResult {
+    pub fn appends_succesful(&self) -> u64 {
+        self.appends_succesful
+    }
+    pub fn failed_peers(&self) -> &[usize] {
+        &self.failed_peers
+    }
+}
+
+async fn manage_append_entries_tasks(
     mut tasks: JoinSet<Result<AppendEntriesResponse, RequestError>>,
-) {
+) -> Result<SuccessfulAppendEntriesResult, FailureAppendEntriesResult>{
+    let mut appends_succesful = 1;
+    let mut failed_peers = Vec::with_capacity(tasks.len());
+
     while let Some(res) = tasks.join_next().await {
         let task_result = match res {
             Ok(response) => response,
@@ -124,23 +173,60 @@ async fn manage_append_entries_tasks<S: Consensus>(
         let append_entries_response = match task_result {
             Ok(response) => response,
             Err(error) => {
-                state.restart_peer(error.index).await;
+                failed_peers.push(error.index);
                 continue;
             }
         };
 
-        if let AppendEntriesResponse::Err(term) = append_entries_response {
-            //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
-            state.become_follower(None, term);
-            tracing::info!(action = "becomeFollower", term = term);
-            break;
-        };
+        match append_entries_response{
+            AppendEntriesResponse::Ok => appends_succesful += 1,
+            AppendEntriesResponse::Err(higher_term) => {
+
+            return Err(FailureAppendEntriesResult {
+        higher_term, failed_peers
+    });
+        }
+        }
     }
+
+    Ok(SuccessfulAppendEntriesResult {
+        appends_succesful, failed_peers
+    })
 }
 
-pub async fn vote<S: Consensus>(state: &mut S) {
-    let tasks = prepare_vote_tasks(state).await;
-    manage_vote_tasks(state, tasks).await;
+pub async fn vote<S: Consensus + PeersManagement >(state: &S,peers: &Peers) ->VoteResult{
+    let mut tasks = prepare_vote_tasks(state, peers).await;
+    collect_vote_results(&mut tasks).await
+}
+
+
+async fn prepare_vote_tasks<S: Consensus + PeersManagement >(
+    state: &S,
+    peers: &Peers,
+) -> JoinSet<Result<VoteResponse, RequestError>> {
+    let mut tasks = JoinSet::new();
+    let current_term = state.current_term();
+    let addr = state.id().addr().to_string();
+    let last_log_info = state.last_log_info();
+
+    //TODO: probably should be better to use a select and hook the server to listen for the heartbeat
+    // https://docs.rs/tokio/latest/tokio/task/struct.JoinSet.html#examples
+    for (index, peer) in peers.iter().enumerate() {
+        let client = peer.client();
+
+        let mut request = client.request_vote_request();
+        request.get().set_term(current_term);
+        request.get().set_candidate_id(&addr);
+        request
+            .get()
+            .set_last_log_index(last_log_info.last_log_index());
+        request
+            .get()
+            .set_last_log_term(last_log_info.last_log_term());
+
+        tasks.spawn_local(send_vote(request, index));
+    }
+    tasks
 }
 
 async fn send_vote(
@@ -186,77 +272,48 @@ async fn send_vote(
     };
 }
 
-/*
-fn prepare_vote_request(
-    peer: &Peer,
-    current_term: u64,
-    addr: &str,
-    last_index: u64,
-    last_term: u64,
-) {
-    let client = peer.client();
-    let mut request = client.request_vote_request();
-    request.get().set_term(current_term);
-    request.get().set_candidate_id(&addr);
-    request
-        .get()
-        .set_last_log_index(last_log_info.last_log_index());
-    request
-        .get()
-        .set_last_log_term(last_log_info.last_log_term());
-    request
+pub struct VoteResult{
+    votes_granted: u64,
+    failed_peers: Vec<usize>
 }
-*/
+//TODO: get the errors when the term is lower than the one from the peer
+async fn collect_vote_results(
+    tasks: &mut JoinSet<Result<VoteResponse, RequestError>>,
+) -> VoteResult {
+    // We already “voted for ourselves,” so start at 1.
+    let mut votes_granted = 1;
+    let mut failed_peers = Vec::with_capacity(tasks.len());
 
-async fn prepare_vote_tasks<S: Consensus>(
-    state: &mut S,
-) -> JoinSet<Result<VoteResponse, RequestError>> {
-    let mut tasks = JoinSet::new();
-    let current_term = state.current_term();
-    let addr = state.id().addr().to_string();
-    let last_log_info = state.last_log_info();
-
-    //TODO: probably should be better to use a select and hook the server to listen for the heartbeat
-    // https://docs.rs/tokio/latest/tokio/task/struct.JoinSet.html#examples
-    for (index, peer) in state.peers().iter().enumerate() {
-        let client = peer.client();
-
-        let mut request = client.request_vote_request();
-        request.get().set_term(current_term);
-        request.get().set_candidate_id(&addr);
-        request
-            .get()
-            .set_last_log_index(last_log_info.last_log_index());
-        request
-            .get()
-            .set_last_log_term(last_log_info.last_log_term());
-
-        tasks.spawn_local(send_vote(request, index));
-    }
-    tasks
-}
-
-async fn manage_vote_tasks<S: Consensus>(
-    state: &mut S,
-    mut tasks: JoinSet<Result<VoteResponse, RequestError>>,
-) {
-    //NOTE: we start with one vote because we vote for ourself
-    let mut votes = 1;
-    while let Some(res) = tasks.join_next().await {
-        //TODO: make it better, extract the request creation so it can be reused and a new task added to the list if it fails
-        match res.expect("why joinhandle failed?") {
-            Ok(r) => {
-                votes += r.vote_granted() as u64;
+    while let Some(joined) = tasks.join_next().await {
+        match joined {
+            // The task itself panicked or was cancelled (JoinError)
+            Err(join_error) => {
+                tracing::error!("JoinSet task failed: {:?}", join_error);
+                // We don't know which peer index that was; skip
+                continue;
             }
-            Err(error) => {
-                //TODO: we hang here, it blocks. spawn it
-                state.restart_peer(error.index).await;
-                tracing::error!("reconnected")
-            }
+
+            // The task completed; now look at its Result<VoteResponse, RequestError>
+            Ok(task_result) => match task_result {
+                // RPC succeeded and gave us a VoteResponse
+                Ok(vote_resp) => {
+                    votes_granted += vote_resp.vote_granted() as u64;
+                }
+                // RPC errored (network failure, etc.)
+                Err(req_err) => {
+                    tracing::warn!("Peer {} had RPC failure: {:?}", req_err.index, req_err.error);
+                    failed_peers.push(req_err.index);
+                }
+            },
         }
     }
-    state.count_votes(votes);
+
+    VoteResult {
+        votes_granted,
+        failed_peers,
+    }
 }
+
 
 pub async fn create_client(addr: &SocketAddr) -> Result<raft::Client, Box<dyn std::error::Error>> {
     let stream = tokio::net::TcpStream::connect(addr).await?;

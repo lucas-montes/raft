@@ -45,6 +45,7 @@ impl<'a> From<raft_capnp::vote_response::Reader<'a>> for VoteResponse {
     }
 }
 
+//TODO: this should probably be a regular result
 pub enum AppendEntriesResponse {
     Ok,
     Err(u64),

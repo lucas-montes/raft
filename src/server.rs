@@ -22,6 +22,19 @@ pub struct Server {
 }
 
 impl Server {
+
+    pub fn new(
+        raft_channel: Sender<RaftMsg>,
+        commands_channel: Sender<CommandMsg>,
+        peers_channel: Sender<NewPeer>,
+    ) -> Self {
+        Self {
+            raft_channel,
+            commands_channel,
+            peers_channel,
+        }
+    }
+
     pub async fn run(self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         let client: raft::Client = capnp_rpc::new_client(self);
@@ -43,17 +56,6 @@ impl Server {
         }
     }
 
-    pub fn new(
-        raft_channel: Sender<RaftMsg>,
-        commands_channel: Sender<CommandMsg>,
-        peers_channel: Sender<NewPeer>,
-    ) -> Self {
-        Self {
-            raft_channel,
-            commands_channel,
-            peers_channel,
-        }
-    }
 }
 
 struct Item {
@@ -176,6 +178,10 @@ impl raft::Server for Server {
 
         pry!(request.get_history());
         let peer = pry!(request.get_peer());
+
+        let c = pry!(peer.get_client());
+        let addr = pry!(peer.get_address());
+        let id = pry!(peer.get_id());
 
         let channel = self.peers_channel.clone();
         Promise::from_future(async move {

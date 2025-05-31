@@ -9,30 +9,30 @@ use crate::{
     client::{append_entries, vote},
     consensus::Consensus,
     dto::{CommandMsg, Entry, Operation, RaftMsg},
-    peers::{NewPeer, PeerDisconnected},
+    peers::{NewPeer, PeerDisconnected, PeersDisconnected, PeersManagement},
     state::{Role, State},
 };
 
 #[derive(Debug)]
-pub struct Node {
-    state: State,
+pub struct Node<S: Consensus + PeersManagement> {
+    state: S,
     heartbeat_interval: f64,
     election_timeout: f64,
     raft_channel: Receiver<RaftMsg>,
     commands_channel: Receiver<CommandMsg>,
     peers_channel: Receiver<NewPeer>,
-    peers_task_channel: Sender<PeerDisconnected>,
+    peers_task_channel: Sender<PeersDisconnected>,
 }
 
-impl Node {
+impl<S: Consensus + PeersManagement > Node<S> {
     pub fn new(
-        state: State,
+        state: S,
         heartbeat_interval: f64,
         election_timeout: f64,
         raft_channel: Receiver<RaftMsg>,
         commands_channel: Receiver<CommandMsg>,
         peers_channel: Receiver<NewPeer>,
-        peers_task_channel: Sender<PeerDisconnected>,
+        peers_task_channel: Sender<PeersDisconnected>,
     ) -> Self {
         Self {
             state,
@@ -44,6 +44,10 @@ impl Node {
             peers_task_channel,
         }
     }
+    pub fn state(&self) -> &S {
+        &self.state
+    }
+
 
     async fn handle_command(&mut self, rpc: CommandMsg) {
         match rpc {
@@ -112,7 +116,7 @@ impl Node {
         loop {
             tokio::select! {
                 Some(rpc) = self.peers_channel.recv() => {
-                    self.state.add_peer(rpc);
+                    // self.state.add_peer(rpc);
                 }
 
                 //  Incoming RPCs from external users
@@ -157,18 +161,32 @@ impl Node {
                 //TODO: maybe the following functions could be driven by the role and a trait
 
                 //  election timeout fires → start election
-                _ = &mut election_timeout, if self.state.role() != Role::Leader => {
+                _ = &mut election_timeout, if self.state.role() != &Role::Leader => {
                     election_timeout.as_mut().reset(Instant::now() + election_dur);
                     tracing::info!(action="becomeCandidate");
                     self.state.become_candidate();
                     tracing::info!(action="sendVotes");
-                    vote(&mut self.state).await;
+                    let result = vote(&self.state, &self.state.peers()).await;
                 }
 
                 //  heartbeat tick → send heartbeats if leader
-                _ = heartbeat_interval.tick(), if self.state.role() == Role::Leader => {
+                _ = heartbeat_interval.tick(), if self.state.role() == &Role::Leader => {
                     tracing::info!(action="sendHeartbeat");
-                    append_entries(&mut self.state, &[]).await;
+                    let result = append_entries(&self.state, self.state.peers(), &[]).await;
+
+                    match result {
+                        Ok(r) => {
+                            let disco_peers = r.failed_peers().iter().map(|&i| self.state.remove_peer(i));
+                            let disco = PeersDisconnected::new(disco_peers);
+                            self.peers_task_channel.send(disco);
+                        }
+                        Err(err) => {
+                            //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
+                            self.state.become_follower(None, err.higher_term());
+                            tracing::info!(action = "becomeFollower", term = err.higher_term());
+                        }
+                    }
+
                 }
             }
         }

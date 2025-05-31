@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, str::FromStr};
 
 use crate::{
-    dto::VoteResponse, peers::Peers, state::NodeId, storage::{LogEntries, LogEntry, LogsInformation}
+    dto::VoteResponse, peers::Peers, state::{NodeId, Role}, storage::{LogEntries, LogEntry, LogsInformation}
 };
 
 #[derive(Debug)]
@@ -13,7 +13,6 @@ pub enum AppendEntriesResult {
 
 pub trait Consensus {
     async fn commit_hard_state(&self);
-    async fn restart_peer(&mut self, peer_index: usize); //TODO: doesnt belong here
     fn current_term(&self) -> u64;
     fn commit_index(&self) -> u64;
     fn update_commit_index(&mut self, commit_index: u64);
@@ -122,8 +121,8 @@ pub trait Consensus {
     }
 
     fn count_votes(&mut self, votes: u64) {
-        let num_nodes = self.peers().total_connected();
-        let has_majority = votes > num_nodes.div_euclid(2) as u64;
+        let num_nodes = self.cluster_size();
+        let has_majority = votes > num_nodes.div_euclid(2);
         if has_majority || num_nodes.eq(&1) {
             self.become_leader();
             tracing::info!(
@@ -142,8 +141,8 @@ pub trait Consensus {
         }
     }
 
+    fn cluster_size(&self)-> u64;
     fn last_log_info(&self) -> LogsInformation;
-    fn peers(&self) -> &Peers;
     fn leader(&self) -> Option<SocketAddr>;
     fn log_entries(&mut self) -> &mut LogEntries; //TODO: should communicate with channels probably
     fn vote_for(&mut self, node: NodeId);
@@ -152,6 +151,7 @@ pub trait Consensus {
     fn become_candidate(&mut self);
     fn become_leader(&mut self);
     fn id(&self) -> &NodeId;
+    fn role(&self)->&Role;
 }
 
 // #[cfg(test)]

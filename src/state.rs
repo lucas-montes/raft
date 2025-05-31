@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, fmt::Debug, io::BufWriter, net::SocketAddr, path::PathBuf, str::FromStr};
 
 use crate::{
-    consensus::Consensus, peers::{Peer, Peers}, raft_capnp::{self}, storage::{LogEntries, LogEntry, LogsInformation}
+    consensus::Consensus, peers::{Peer, Peers, PeersManagement, }, raft_capnp::{self}, storage::{LogEntries, LogEntry, LogsInformation}
 };
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -229,20 +229,35 @@ impl State {
     pub fn role(&self) -> Role {
         self.role
     }
+}
 
-    pub fn add_peer(&mut self, peer: impl Into<Peer>) {
+impl PeersManagement for State {
+    fn add_peer(&mut self, peer: impl Into<Peer>) {
         self.peers.push(peer.into());
+    }
+
+    fn remove_peer(&mut self, index: usize) ->Peer{
+        todo!()
+    }
+
+    fn peers(&self) -> &Peers {
+        todo!()
     }
 }
 
 impl Consensus for State {
+    fn role(&self)->&Role {
+        &self.role
+    }
+
+    fn cluster_size(&self)-> u64 {
+        self.peers.total_connected() as u64 + 1 // +1 for self
+    }
+
     fn id(&self) -> &NodeId {
         &self.id
     }
 
-    fn peers(&self) -> &Peers {
-        &self.peers
-    }
     fn update_commit_index(&mut self, commit_index: u64) {
         self.soft_state.commit_index = commit_index;
     }
@@ -297,10 +312,6 @@ impl Consensus for State {
 
     fn last_log_info(&self) -> LogsInformation {
         self.hard_state.log_entries.last_log_info()
-    }
-
-    async fn restart_peer(&mut self, peer_index: usize) {
-        self.peers[peer_index].reconnect().await
     }
 
     async fn commit_hard_state(&self) {
