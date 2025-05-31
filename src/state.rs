@@ -1,19 +1,7 @@
-use std::{
-    cmp::Ordering,
-    fmt::Debug,
-    io::BufWriter,
-    net::SocketAddr,
-    ops::{Deref, DerefMut},
-    path::PathBuf,
-    str::FromStr,
-    time::Duration,
-};
+use std::{cmp::Ordering, fmt::Debug, io::BufWriter, net::SocketAddr, path::PathBuf, str::FromStr};
 
 use crate::{
-    client::create_client,
-    consensus::Consensus,
-    raft_capnp::{self, raft},
-    storage::{LogEntries, LogEntry, LogsInformation},
+    consensus::Consensus, peers::{Peer, Peers}, raft_capnp::{self}, storage::{LogEntries, LogEntry, LogsInformation}
 };
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -22,99 +10,6 @@ pub enum Role {
     Candidate,
     #[default]
     Follower,
-}
-
-#[derive(Clone)]
-pub struct Peer {
-    id: NodeId,
-    addr: SocketAddr,
-    client: raft::Client,
-}
-
-impl Debug for Peer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Peer {{ addr: {:?} }}", self.addr)
-    }
-}
-
-impl Peer {
-    pub fn client(&self) -> raft::Client {
-        self.client.clone()
-    }
-
-    pub async fn new(addr: SocketAddr) -> Self {
-        let client = Self::connect(addr).await;
-        Self {
-            id: NodeId(addr),
-            addr,
-            client,
-        }
-    }
-
-    pub async fn reconnect(&mut self) {
-        self.client = Self::connect(self.addr).await;
-    }
-
-    async fn connect(addr: SocketAddr) -> raft::Client {
-        tokio::task::spawn_local(async move {
-            let mut counter = 0;
-            tracing::info!(action = "adding peer", peer = addr.to_string());
-            loop {
-                match create_client(&addr).await {
-                    Ok(client) => {
-                        tracing::info!(action = "peer connected", peer = addr.to_string());
-                        break client;
-                    }
-                    Err(err) => {
-                        counter += 1;
-                        if counter % 5 == 0 {
-                            tracing::error!(
-                                attempt = counter,
-                                peer = addr.to_string(),
-                                "failed to connect to peer"
-                            );
-                        }
-                        tokio::time::sleep(Duration::from_millis(counter * 10)).await;
-                    }
-                }
-            }
-        })
-        .await
-        .expect("connecting to peer failed")
-    }
-}
-
-#[derive(Default, Debug, Clone)]
-pub struct Peers {
-    connected: Vec<Peer>,
-    disconnected: Vec<Peer>,
-}
-
-impl Peers {
-    pub fn disconnect(&mut self, index: usize) {
-        //TODO: add some awaking and background task mechanism to reconnect nodes
-        let peer = self.connected.remove(index);
-        self.disconnected.push(peer);
-    }
-
-    pub fn total_connected(&self) -> usize {
-        //NOTE: we add one to the number of nodes to count ourself
-        self.connected.len() + 1
-    }
-}
-
-impl Deref for Peers {
-    type Target = Vec<Peer>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.connected
-    }
-}
-
-impl DerefMut for Peers {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.connected
-    }
 }
 
 #[derive(Debug, Clone, Eq, Copy)]
@@ -335,8 +230,8 @@ impl State {
         self.role
     }
 
-    pub async fn add_peer(&mut self, addr: SocketAddr) {
-        self.peers.push(Peer::new(addr).await);
+    pub fn add_peer(&mut self, peer: impl Into<Peer>) {
+        self.peers.push(peer.into());
     }
 }
 

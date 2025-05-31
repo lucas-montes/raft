@@ -1,9 +1,7 @@
 use std::{net::SocketAddr, str::FromStr};
 
 use crate::{
-    dto::VoteResponse,
-    state::{NodeId, Peers},
-    storage::{LogEntries, LogEntry, LogsInformation},
+    dto::VoteResponse, peers::Peers, state::NodeId, storage::{LogEntries, LogEntry, LogsInformation}
 };
 
 #[derive(Debug)]

@@ -6,9 +6,10 @@ use futures::AsyncReadExt;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    client::create_client_com,
+    client::{create_client, create_client_com},
     consensus::AppendEntriesResult,
     dto::{CommandMsg, RaftMsg},
+    peers::NewPeer,
     raft_capnp::{command, raft},
     storage::LogEntry,
 };
@@ -17,6 +18,7 @@ use crate::{
 pub struct Server {
     raft_channel: Sender<RaftMsg>,
     commands_channel: Sender<CommandMsg>,
+    peers_channel: Sender<NewPeer>,
 }
 
 impl Server {
@@ -41,10 +43,15 @@ impl Server {
         }
     }
 
-    pub fn new(raft_channel: Sender<RaftMsg>, commands_channel: Sender<CommandMsg>) -> Self {
+    pub fn new(
+        raft_channel: Sender<RaftMsg>,
+        commands_channel: Sender<CommandMsg>,
+        peers_channel: Sender<NewPeer>,
+    ) -> Self {
         Self {
             raft_channel,
             commands_channel,
+            peers_channel,
         }
     }
 }
@@ -160,6 +167,39 @@ impl command::Server for Server {
 }
 
 impl raft::Server for Server {
+    fn join_cluster(
+        &mut self,
+        params: raft::JoinClusterParams,
+        _: raft::JoinClusterResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let request = pry!(params.get());
+
+        pry!(request.get_history());
+        let peer = pry!(request.get_peer());
+
+        let channel = self.peers_channel.clone();
+        Promise::from_future(async move {
+            //channel.send(msg).await.expect("msg not sent");
+            Ok(())
+        })
+    }
+
+    fn get_leader(
+        &mut self,
+        _: raft::GetLeaderParams,
+        mut results: raft::GetLeaderResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let channel = self.commands_channel.clone();
+        Promise::from_future(async move {
+            let (msg, rx) = CommandMsg::get_leader();
+            channel.send(msg).await.expect("msg not sent");
+            if let Some(leader) = rx.await.expect("msg not received") {
+                let client = create_client(&leader).await.expect("msg not received");
+                results.get().set_leader(client);
+            };
+            Ok(())
+        })
+    }
     /// The node (a follower or candidate) receives a request from the leader to update its log
     fn append_entries(
         &mut self,
@@ -212,8 +252,8 @@ impl raft::Server for Server {
                             response.set_err(term);
                         }
                         AppendEntriesResult::LogEntriesMismatch {
-                            last_index,
-                            last_term,
+                            last_index: _,
+                            last_term: _,
                         } => {
                             // let mut entries_client = entries_client.get_request();
                             // entries_client.get().set_last_log_index(last_index);

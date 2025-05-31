@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use tokio::{
-    sync::mpsc::Receiver,
+    sync::mpsc::{Receiver, Sender},
     time::{interval, sleep, Instant},
 };
 
@@ -9,7 +9,8 @@ use crate::{
     client::{append_entries, vote},
     consensus::Consensus,
     dto::{CommandMsg, Entry, Operation, RaftMsg},
-    state::{Peer, Role, State},
+    peers::{NewPeer, PeerDisconnected},
+    state::{Role, State},
 };
 
 #[derive(Debug)]
@@ -19,6 +20,8 @@ pub struct Node {
     election_timeout: f64,
     raft_channel: Receiver<RaftMsg>,
     commands_channel: Receiver<CommandMsg>,
+    peers_channel: Receiver<NewPeer>,
+    peers_task_channel: Sender<PeerDisconnected>,
 }
 
 impl Node {
@@ -28,6 +31,8 @@ impl Node {
         election_timeout: f64,
         raft_channel: Receiver<RaftMsg>,
         commands_channel: Receiver<CommandMsg>,
+        peers_channel: Receiver<NewPeer>,
+        peers_task_channel: Sender<PeerDisconnected>,
     ) -> Self {
         Self {
             state,
@@ -35,6 +40,8 @@ impl Node {
             heartbeat_interval,
             election_timeout,
             commands_channel,
+            peers_channel,
+            peers_task_channel,
         }
     }
 
@@ -49,7 +56,7 @@ impl Node {
                     tracing::error!("Failed to send response in channel for get leader");
                 }
             }
-            CommandMsg::Read(req) => {
+            CommandMsg::Read(_req) => {
                 // Handle read command
             }
             CommandMsg::Modify(req) => {
@@ -82,10 +89,10 @@ impl Node {
                             tracing::error!("Failed to send response in channel for create");
                         }
                     }
-                    Operation::Update(id, data) => {
+                    Operation::Update(_id, _data) => {
                         // Handle update command
                     }
-                    Operation::Delete(id) => {
+                    Operation::Delete(_id) => {
                         // Handle delete command
                     }
                 }
@@ -104,6 +111,10 @@ impl Node {
 
         loop {
             tokio::select! {
+                Some(rpc) = self.peers_channel.recv() => {
+                    self.state.add_peer(rpc);
+                }
+
                 //  Incoming RPCs from external users
                 Some(rpc) = self.commands_channel.recv() => {
                     self.handle_command(rpc).await;

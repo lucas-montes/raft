@@ -38,6 +38,8 @@ interface Command {
 interface Raft extends (Command) {
   appendEntries @0 (request: AppendEntriesRequest) -> (response: AppendEntriesResponse);
   requestVote @1 (term :UInt64, candidateId :Text, lastLogIndex :UInt64, lastLogTerm :UInt64) -> (response: VoteResponse);
+  getLeader @2 () -> (leader: Raft);
+  joinCluster @3 (peer: Peer, history: NodeHistory) -> (peers: List(Peer));
 
 }
 
@@ -45,6 +47,12 @@ interface Raft extends (Command) {
   interface LogEntriesHandler {
     get @0 (lastLogIndex: UInt64, lastLogTerm: UInt64) -> (entries: List(LogEntry));
   }
+
+struct NodeHistory {
+    term @0 :UInt64;
+  lastLogIndex @1 :UInt64;
+  lastLogTerm @2 :UInt64;
+}
 
 struct AppendEntriesRequest {
   term @0 :UInt64;

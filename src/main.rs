@@ -2,10 +2,11 @@ use std::net::SocketAddr;
 
 use clap::Parser;
 use node::Node;
+use peers::PeersReconnectionTask;
 use rand::random_range;
 use server::Server;
 use state::{NodeId, State};
-use tracing_subscriber::{fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 pub mod raft_capnp {
     include!(concat!(env!("OUT_DIR"), "/raft_capnp.rs"));
@@ -15,6 +16,7 @@ mod client;
 mod consensus;
 mod dto;
 mod node;
+mod peers;
 mod server;
 mod state;
 mod storage;
@@ -59,24 +61,37 @@ async fn main() {
         .run_until(async move {
             let heartbeat_interval = random_range(1.0..2.9);
             let election_timeout = random_range(3.0..6.0);
-            //TODO: when starting a new node (or restarting) read the state from disk
 
-            let (rtx, rrx) = tokio::sync::mpsc::channel(100);
-            let (ctx, crx) = tokio::sync::mpsc::channel(100);
+            let (raft_tx, raft_rx) = tokio::sync::mpsc::channel(100);
+            let (commands_tx, commands_rx) = tokio::sync::mpsc::channel(100);
+            let (peers_tx, peers_rx) = tokio::sync::mpsc::channel(100);
+            let (peers_task_tx, peers_task_rx) = tokio::sync::mpsc::channel(100);
 
-            let server = Server::new(rtx, ctx);
+            let server = Server::new(raft_tx, commands_tx, peers_tx.clone());
             let server_task = tokio::task::spawn_local(server.run(cli.addr));
 
-            let mut state = State::new(NodeId::new(cli.addr.clone()), "data/state");
+            let mut state = State::new(NodeId::new(cli.addr), "data/state");
 
-            for node in nodes {
-                state.add_peer(node).await;
-            }
-            let service = Node::new(state, heartbeat_interval, election_timeout, rrx, crx);
+            //TODO: loop over nodes if any, check if they are up so you can join a cluster, otherwiser you are the cluster
+            // for node in nodes {
+            //     state.add_peer(node).await;
+            // }
+            let service = Node::new(
+                state,
+                heartbeat_interval,
+                election_timeout,
+                raft_rx,
+                commands_rx,
+                peers_rx,
+                peers_task_tx,
+            );
+
+            let reconnection_task = PeersReconnectionTask::new(peers_task_rx, peers_tx);
 
             let client_task = tokio::task::spawn_local(service.run());
+            let peers_task = tokio::task::spawn_local(reconnection_task.run());
 
-            match tokio::try_join!(server_task, client_task) {
+            match tokio::try_join!(server_task, client_task, peers_task) {
                 Ok(_) => {
                     tracing::info!("Server and client are running");
                 }
