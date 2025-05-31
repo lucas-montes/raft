@@ -1,18 +1,18 @@
 use std::{
-    net::SocketAddr, ops::{Deref, DerefMut}, slice::Iter, time::Duration
+    net::SocketAddr,
+    ops::{Deref, DerefMut},
+    time::Duration,
 };
 
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::{client::create_client, raft_capnp::raft, state::NodeId};
 
-
 pub trait PeersManagement {
     fn add_peer(&mut self, peer: impl Into<Peer>);
-    fn remove_peer(&mut self, index: usize)->Peer;
+    fn remove_peer(&mut self, index: usize) -> Peer;
     fn peers(&self) -> &Peers;
 }
-
 
 #[derive(Clone)]
 pub struct Peer {
@@ -107,9 +107,9 @@ impl From<Peer> for NewPeer {
     }
 }
 
-impl Into<Peer> for NewPeer {
-    fn into(self) -> Peer {
-        self.0
+impl From<NewPeer> for Peer {
+    fn from(val: NewPeer) -> Self {
+        val.0
     }
 }
 
@@ -118,18 +118,20 @@ pub struct PeerDisconnected {
     addr: SocketAddr,
 }
 
-pub struct PeersDisconnected (Vec<PeerDisconnected>);
+pub struct PeersDisconnected(Vec<PeerDisconnected>);
 
 impl PeersDisconnected {
-pub fn new(peers: impl Iterator<Item =Peer>) -> Self {
+    pub fn new(peers: impl Iterator<Item = Peer>) -> Self {
         Self(peers.map(PeerDisconnected::from).collect())
     }
-
 }
 
 impl From<Peer> for PeerDisconnected {
     fn from(value: Peer) -> Self {
-        Self { id: value.id, addr: value.addr }
+        Self {
+            id: value.id,
+            addr: value.addr,
+        }
     }
 }
 
@@ -143,7 +145,7 @@ impl PeersReconnectionTask {
         Self { rx, tx }
     }
 
-    pub async fn run(mut self){
+    pub async fn run(mut self) {
         loop {
             tokio::select! {
                 Some(rpc) = self.rx.recv() => {

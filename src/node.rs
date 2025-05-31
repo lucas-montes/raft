@@ -9,8 +9,8 @@ use crate::{
     client::{append_entries, vote},
     consensus::Consensus,
     dto::{CommandMsg, Entry, Operation, RaftMsg},
-    peers::{NewPeer, PeerDisconnected, PeersDisconnected, PeersManagement},
-    state::{Role, State},
+    peers::{NewPeer, PeersDisconnected, PeersManagement},
+    state::Role,
 };
 
 #[derive(Debug)]
@@ -24,7 +24,7 @@ pub struct Node<S: Consensus + PeersManagement> {
     peers_task_channel: Sender<PeersDisconnected>,
 }
 
-impl<S: Consensus + PeersManagement > Node<S> {
+impl<S: Consensus + PeersManagement> Node<S> {
     pub fn new(
         state: S,
         heartbeat_interval: f64,
@@ -48,7 +48,6 @@ impl<S: Consensus + PeersManagement > Node<S> {
         &self.state
     }
 
-
     async fn handle_command(&mut self, rpc: CommandMsg) {
         match rpc {
             CommandMsg::GetLeader(req) => {
@@ -56,7 +55,7 @@ impl<S: Consensus + PeersManagement > Node<S> {
                 //TODO: instead of sendig only the addr and creating the client on the server I
                 //should send the client in peers
                 let sender = req.sender;
-                if let Err(_) = sender.send(resp) {
+                if sender.send(resp).is_err() {
                     tracing::error!("Failed to send response in channel for get leader");
                 }
             }
@@ -138,7 +137,7 @@ impl<S: Consensus + PeersManagement > Node<S> {
                                 msg.leader_commit,
                                 msg.entries,
                             );
-                            if let Err(_) = sender.send(resp){
+                            if sender.send(resp).is_err(){
                                 tracing::error!("Failed to send response in channel for append entries");
                             }
                         }
@@ -151,7 +150,7 @@ impl<S: Consensus + PeersManagement > Node<S> {
                                 msg.last_log_index(),
                                 msg.last_log_term(),
                             );
-                            if let Err(_) = sender.send(resp){
+                            if sender.send(resp).is_err(){
                                 tracing::error!("Failed to send response in channel for vote");
                             }
                         }
@@ -166,7 +165,7 @@ impl<S: Consensus + PeersManagement > Node<S> {
                     tracing::info!(action="becomeCandidate");
                     self.state.become_candidate();
                     tracing::info!(action="sendVotes");
-                    let result = vote(&self.state, &self.state.peers()).await;
+                    let result = vote(&self.state, self.state.peers()).await;
                 }
 
                 //  heartbeat tick → send heartbeats if leader

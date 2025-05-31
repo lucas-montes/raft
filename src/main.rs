@@ -70,7 +70,7 @@ async fn main() {
             let server = Server::new(raft_tx, commands_tx, peers_tx.clone());
             let server_task = tokio::task::spawn_local(server.run(cli.addr));
 
-            let mut state = State::new(NodeId::new(cli.addr), "data/state");
+            let state = State::new(NodeId::new(cli.addr), "data/state");
 
             //TODO: loop over nodes if any, check if they are up so you can join a cluster, otherwiser you are the cluster
             // for node in nodes {

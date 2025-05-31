@@ -1,7 +1,10 @@
 use std::{cmp::Ordering, fmt::Debug, io::BufWriter, net::SocketAddr, path::PathBuf, str::FromStr};
 
 use crate::{
-    consensus::Consensus, peers::{Peer, Peers, PeersManagement, }, raft_capnp::{self}, storage::{LogEntries, LogEntry, LogsInformation}
+    consensus::Consensus,
+    peers::{Peer, Peers, PeersManagement},
+    raft_capnp::{self},
+    storage::{LogEntries, LogEntry, LogsInformation},
 };
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
@@ -236,7 +239,7 @@ impl PeersManagement for State {
         self.peers.push(peer.into());
     }
 
-    fn remove_peer(&mut self, index: usize) ->Peer{
+    fn remove_peer(&mut self, index: usize) -> Peer {
         todo!()
     }
 
@@ -246,11 +249,11 @@ impl PeersManagement for State {
 }
 
 impl Consensus for State {
-    fn role(&self)->&Role {
+    fn role(&self) -> &Role {
         &self.role
     }
 
-    fn cluster_size(&self)-> u64 {
+    fn cluster_size(&self) -> u64 {
         self.peers.total_connected() as u64 + 1 // +1 for self
     }
 

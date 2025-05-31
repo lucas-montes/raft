@@ -1,7 +1,9 @@
 use std::{net::SocketAddr, str::FromStr};
 
 use crate::{
-    dto::VoteResponse, peers::Peers, state::{NodeId, Role}, storage::{LogEntries, LogEntry, LogsInformation}
+    dto::VoteResponse,
+    state::{NodeId, Role},
+    storage::{LogEntries, LogEntry, LogsInformation},
 };
 
 #[derive(Debug)]
@@ -141,7 +143,7 @@ pub trait Consensus {
         }
     }
 
-    fn cluster_size(&self)-> u64;
+    fn cluster_size(&self) -> u64;
     fn last_log_info(&self) -> LogsInformation;
     fn leader(&self) -> Option<SocketAddr>;
     fn log_entries(&mut self) -> &mut LogEntries; //TODO: should communicate with channels probably
@@ -151,7 +153,7 @@ pub trait Consensus {
     fn become_candidate(&mut self);
     fn become_leader(&mut self);
     fn id(&self) -> &NodeId;
-    fn role(&self)->&Role;
+    fn role(&self) -> &Role;
 }
 
 // #[cfg(test)]

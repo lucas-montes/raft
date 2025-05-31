@@ -22,7 +22,6 @@ pub struct Server {
 }
 
 impl Server {
-
     pub fn new(
         raft_channel: Sender<RaftMsg>,
         commands_channel: Sender<CommandMsg>,
@@ -55,7 +54,6 @@ impl Server {
             tokio::task::spawn_local(rpc_system);
         }
     }
-
 }
 
 struct Item {

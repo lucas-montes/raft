@@ -4,14 +4,17 @@ use std::net::SocketAddr;
 use tokio::task::JoinSet;
 
 use crate::{
-    consensus::Consensus, dto::{AppendEntriesResponse, VoteResponse},  peers::{ Peers, PeersManagement }, raft_capnp::{command, raft}, storage::LogEntry
+    consensus::Consensus,
+    dto::{AppendEntriesResponse, VoteResponse},
+    peers::{Peers, PeersManagement},
+    raft_capnp::{command, raft},
+    storage::LogEntry,
 };
 
-
 pub trait RaftClient {
-    fn create_vote_request(&self)->VoteRequest;
-    fn create_append_entries_request(&self)->AppendEntriesRequest;
-    fn peers(&self)->&Peers;
+    fn create_vote_request(&self) -> VoteRequest;
+    fn create_append_entries_request(&self) -> AppendEntriesRequest;
+    fn peers(&self) -> &Peers;
 }
 
 struct AppendEntriesRequest {
@@ -28,18 +31,21 @@ struct VoteRequest {
     last_log_term: u64,
 }
 
-
 struct RequestError {
     index: usize,
     error: capnp::Error,
 }
 
-pub async fn append_entries<S: Consensus + PeersManagement>(state: &S,peers: &Peers, entries: &[LogEntry]) -> Result<SuccessfulAppendEntriesResult, FailureAppendEntriesResult> {
+pub async fn append_entries<S: Consensus + PeersManagement>(
+    state: &S,
+    peers: &Peers,
+    entries: &[LogEntry],
+) -> Result<SuccessfulAppendEntriesResult, FailureAppendEntriesResult> {
     let tasks = prepare_append_entries_tasks(state, peers, entries).await;
     manage_append_entries_tasks(tasks).await
 }
 
-async fn prepare_append_entries_tasks<S: Consensus + PeersManagement >(
+async fn prepare_append_entries_tasks<S: Consensus + PeersManagement>(
     state: &S,
     peers: &Peers,
     entries: &[LogEntry],
@@ -129,10 +135,9 @@ async fn send_append_entries(
     }
 }
 
-
-pub struct FailureAppendEntriesResult{
+pub struct FailureAppendEntriesResult {
     higher_term: u64,
-    failed_peers: Vec<usize>
+    failed_peers: Vec<usize>,
 }
 impl FailureAppendEntriesResult {
     pub fn higher_term(&self) -> u64 {
@@ -142,10 +147,9 @@ impl FailureAppendEntriesResult {
         &self.failed_peers
     }
 }
-pub struct SuccessfulAppendEntriesResult
-{
+pub struct SuccessfulAppendEntriesResult {
     appends_succesful: u64,
-    failed_peers: Vec<usize>
+    failed_peers: Vec<usize>,
 }
 impl SuccessfulAppendEntriesResult {
     pub fn appends_succesful(&self) -> u64 {
@@ -158,7 +162,7 @@ impl SuccessfulAppendEntriesResult {
 
 async fn manage_append_entries_tasks(
     mut tasks: JoinSet<Result<AppendEntriesResponse, RequestError>>,
-) -> Result<SuccessfulAppendEntriesResult, FailureAppendEntriesResult>{
+) -> Result<SuccessfulAppendEntriesResult, FailureAppendEntriesResult> {
     let mut appends_succesful = 1;
     let mut failed_peers = Vec::with_capacity(tasks.len());
 
@@ -178,29 +182,29 @@ async fn manage_append_entries_tasks(
             }
         };
 
-        match append_entries_response{
+        match append_entries_response {
             AppendEntriesResponse::Ok => appends_succesful += 1,
             AppendEntriesResponse::Err(higher_term) => {
-
-            return Err(FailureAppendEntriesResult {
-        higher_term, failed_peers
-    });
-        }
+                return Err(FailureAppendEntriesResult {
+                    higher_term,
+                    failed_peers,
+                });
+            }
         }
     }
 
     Ok(SuccessfulAppendEntriesResult {
-        appends_succesful, failed_peers
+        appends_succesful,
+        failed_peers,
     })
 }
 
-pub async fn vote<S: Consensus + PeersManagement >(state: &S,peers: &Peers) ->VoteResult{
+pub async fn vote<S: Consensus + PeersManagement>(state: &S, peers: &Peers) -> VoteResult {
     let mut tasks = prepare_vote_tasks(state, peers).await;
     collect_vote_results(&mut tasks).await
 }
 
-
-async fn prepare_vote_tasks<S: Consensus + PeersManagement >(
+async fn prepare_vote_tasks<S: Consensus + PeersManagement>(
     state: &S,
     peers: &Peers,
 ) -> JoinSet<Result<VoteResponse, RequestError>> {
@@ -260,7 +264,7 @@ async fn send_vote(
         }
     };
 
-    return match response_value {
+    match response_value {
         Ok(r) => Ok(r.into()),
         Err(err) => {
             tracing::error!(
@@ -269,12 +273,12 @@ async fn send_vote(
             );
             Err(RequestError { index, error: err })
         }
-    };
+    }
 }
 
-pub struct VoteResult{
+pub struct VoteResult {
     votes_granted: u64,
-    failed_peers: Vec<usize>
+    failed_peers: Vec<usize>,
 }
 //TODO: get the errors when the term is lower than the one from the peer
 async fn collect_vote_results(
@@ -301,7 +305,11 @@ async fn collect_vote_results(
                 }
                 // RPC errored (network failure, etc.)
                 Err(req_err) => {
-                    tracing::warn!("Peer {} had RPC failure: {:?}", req_err.index, req_err.error);
+                    tracing::warn!(
+                        "Peer {} had RPC failure: {:?}",
+                        req_err.index,
+                        req_err.error
+                    );
                     failed_peers.push(req_err.index);
                 }
             },
@@ -313,7 +321,6 @@ async fn collect_vote_results(
         failed_peers,
     }
 }
-
 
 pub async fn create_client(addr: &SocketAddr) -> Result<raft::Client, Box<dyn std::error::Error>> {
     let stream = tokio::net::TcpStream::connect(addr).await?;

@@ -1,7 +1,6 @@
 use std::{cmp::Ordering, fmt::Debug, ops::Deref};
 
-use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
 #[derive(Debug, Eq)]
 pub struct LogEntry {
@@ -124,7 +123,8 @@ impl LogEntries {
             .append(true)
             .truncate(false)
             .create(true)
-            .open(&format!("data/table/{}", p)).await
+            .open(&format!("data/table/{}", p))
+            .await
             .expect("failed to open storage file");
 
         file.write_all(&data).await.unwrap();
