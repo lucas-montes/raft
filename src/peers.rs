@@ -32,7 +32,13 @@ impl Peer {
         self.client.clone()
     }
 
-    pub async fn new(addr: SocketAddr) -> Self {
+    pub fn new(   id: impl Into<NodeId>,
+    addr: impl Into<SocketAddr>,
+    client: raft::Client,)->Self{
+        Self { id: id.into(), addr:addr.into(), client }
+    }
+
+    pub async fn from_addr(addr: SocketAddr) -> Self {
         let client = Self::connect(addr).await;
         Self {
             id: NodeId::new(addr),
@@ -80,8 +86,7 @@ impl Peers {
     }
 
     pub fn total_connected(&self) -> usize {
-        //NOTE: we add one to the number of nodes to count ourself
-        self.0.len() + 1
+        self.0.len()
     }
 }
 

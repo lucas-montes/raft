@@ -25,7 +25,7 @@ mod storage;
 pub struct Cli {
     #[arg(short, long)]
     addr: SocketAddr,
-    #[arg(short, long, num_args = 1..)]
+    #[arg(short, long, num_args = 0..)]
     nodes: Vec<SocketAddr>,
 }
 

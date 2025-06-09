@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, str::FromStr};
 
 use capnp::capability::Promise;
 use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
@@ -9,7 +9,7 @@ use crate::{
     client::{create_client, create_client_com},
     consensus::AppendEntriesResult,
     dto::{CommandMsg, RaftMsg},
-    peers::NewPeer,
+    peers::{NewPeer, Peer},
     raft_capnp::{command, raft},
     storage::LogEntry,
 };
@@ -177,13 +177,17 @@ impl raft::Server for Server {
         pry!(request.get_history());
         let peer = pry!(request.get_peer());
 
-        let c = pry!(peer.get_client());
-        let addr = pry!(peer.get_address());
-        let id = pry!(peer.get_id());
+        let client = pry!(peer.get_client());
+        let addr = pry!(pry!(peer.get_address()).to_str());
+        let id = pry!(pry!(peer.get_id()).to_str());
+
+        let addr = SocketAddr::from_str(addr).expect("failed to parse NodeId from string");
+
+        let msg = Peer::new(id, addr, client);
 
         let channel = self.peers_channel.clone();
         Promise::from_future(async move {
-            //channel.send(msg).await.expect("msg not sent");
+            channel.send(msg.into()).await.expect("msg not sent");
             Ok(())
         })
     }

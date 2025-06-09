@@ -11,6 +11,7 @@ use crate::{
     dto::{CommandMsg, Entry, Operation, RaftMsg},
     peers::{NewPeer, PeersDisconnected, PeersManagement},
     state::Role,
+    storage::LogEntry,
 };
 
 #[derive(Debug)]
@@ -44,9 +45,6 @@ impl<S: Consensus + PeersManagement> Node<S> {
             peers_task_channel,
         }
     }
-    pub fn state(&self) -> &S {
-        &self.state
-    }
 
     async fn handle_command(&mut self, rpc: CommandMsg) {
         match rpc {
@@ -71,12 +69,16 @@ impl<S: Consensus + PeersManagement> Node<S> {
                 let id = self.state.id().addr().to_string();
                 let current_term = self.state.current_term();
                 let log_entries = self.state.log_entries();
+
                 match req.msg {
                     Operation::Create(data) => {
                         //TODO: it would be cool to be able to serialize the whole command? how to
                         //keep track of the commands in a better and easier way without copying all
                         //the data so much?
                         log_entries.new_entry(current_term, data.clone());
+
+                        //TODO: before commiting we need to ensure that everybody received a copy of it
+                        //TODO: use self.send_entries(&log_entries).await;
                         self.state.commit_hard_state().await;
 
                         let log_entries = self.state.log_entries();
@@ -103,6 +105,18 @@ impl<S: Consensus + PeersManagement> Node<S> {
         }
     }
 
+    async fn disconnect_peers(&mut self, failed_peers: &[usize]) {
+        //TODO: maybe we want to avoid creating this task even if the failed_peers are empty
+        if failed_peers.is_empty() {
+            return;
+        }
+        let disco_peers = failed_peers.iter().map(|&i| self.state.remove_peer(i));
+        let disco = PeersDisconnected::new(disco_peers);
+        if self.peers_task_channel.send(disco).await.is_err() {
+            tracing::error!(action = "fuck sending the reconnection for peers failed");
+        };
+    }
+
     pub async fn run(mut self) {
         let heartbeat_dur = Duration::from_secs_f64(self.heartbeat_interval);
         let election_dur = Duration::from_secs_f64(self.election_timeout);
@@ -115,7 +129,7 @@ impl<S: Consensus + PeersManagement> Node<S> {
         loop {
             tokio::select! {
                 Some(rpc) = self.peers_channel.recv() => {
-                    // self.state.add_peer(rpc);
+                    self.state.add_peer(rpc);
                 }
 
                 //  Incoming RPCs from external users
@@ -123,6 +137,7 @@ impl<S: Consensus + PeersManagement> Node<S> {
                     self.handle_command(rpc).await;
                 }
 
+                // RPCs from the cluster's leader
                 Some(rpc) = self.raft_channel.recv() => {
                     election_timeout.as_mut().reset(Instant::now() + election_dur);
                     match rpc {
@@ -166,27 +181,35 @@ impl<S: Consensus + PeersManagement> Node<S> {
                     self.state.become_candidate();
                     tracing::info!(action="sendVotes");
                     let result = vote(&self.state, self.state.peers()).await;
+                    self.state.count_votes(result.votes_granted());
+                    self.disconnect_peers(result.failed_peers()).await;
                 }
 
                 //  heartbeat tick → send heartbeats if leader
                 _ = heartbeat_interval.tick(), if self.state.role() == &Role::Leader => {
                     tracing::info!(action="sendHeartbeat");
-                    let result = append_entries(&self.state, self.state.peers(), &[]).await;
-
-                    match result {
-                        Ok(r) => {
-                            let disco_peers = r.failed_peers().iter().map(|&i| self.state.remove_peer(i));
-                            let disco = PeersDisconnected::new(disco_peers);
-                            self.peers_task_channel.send(disco);
-                        }
-                        Err(err) => {
-                            //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
-                            self.state.become_follower(None, err.higher_term());
-                            tracing::info!(action = "becomeFollower", term = err.higher_term());
-                        }
-                    }
-
+                    //NOTE: for the heartbeat we don't really care about the error nor the number of successful append entries, or do we?
+                    let _ =  self.send_entries(&[]).await;
                 }
+            }
+        }
+    }
+
+    async fn send_entries(&mut self, entries: &[LogEntry]) -> Result<u64, ()> {
+        //TODO: this probably needs to be a while loop to send entries until everyones agrees or some higher term appears
+        let result = append_entries(&self.state, self.state.peers(), entries).await;
+
+        match result {
+            Ok(r) => {
+                self.disconnect_peers(r.failed_peers()).await;
+                Ok(r.appends_succesful())
+            }
+            Err(err) => {
+                //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
+                self.state.become_follower(None, err.higher_term());
+                tracing::info!(action = "becomeFollower", term = err.higher_term());
+                self.disconnect_peers(err.failed_peers()).await;
+                Err(())
             }
         }
     }

@@ -18,6 +18,13 @@ pub enum Role {
 #[derive(Debug, Clone, Eq, Copy)]
 pub struct NodeId(SocketAddr);
 
+impl From<&str> for NodeId {
+    fn from(addr: &str) -> Self {
+        let addr = SocketAddr::from_str(addr).expect("failed to parse NodeId from string");
+        Self(addr)
+    }
+}
+
 impl NodeId {
     pub fn new(addr: SocketAddr) -> Self {
         Self(addr)
@@ -229,9 +236,6 @@ impl State {
             ..Default::default()
         }
     }
-    pub fn role(&self) -> Role {
-        self.role
-    }
 }
 
 impl PeersManagement for State {
@@ -244,7 +248,7 @@ impl PeersManagement for State {
     }
 
     fn peers(&self) -> &Peers {
-        todo!()
+        &self.peers
     }
 }
 
@@ -254,7 +258,8 @@ impl Consensus for State {
     }
 
     fn cluster_size(&self) -> u64 {
-        self.peers.total_connected() as u64 + 1 // +1 for self
+        //NOTE: we add one to the number of nodes to count ourself
+        self.peers.total_connected() as u64 + 1
     }
 
     fn id(&self) -> &NodeId {

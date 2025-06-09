@@ -122,23 +122,27 @@ pub trait Consensus {
         }
     }
 
-    fn count_votes(&mut self, votes: u64) {
+    fn is_majority(&self, votes: u64) -> bool {
         let num_nodes = self.cluster_size();
         let has_majority = votes > num_nodes.div_euclid(2);
-        if has_majority || num_nodes.eq(&1) {
+        has_majority || num_nodes.eq(&1)
+    }
+
+    fn count_votes(&mut self, votes: u64) {
+        if self.is_majority(votes) {
             self.become_leader();
             tracing::info!(
                 action = "becomeLeader",
                 term = self.current_term(),
                 votes = votes,
-                peers = num_nodes
+                peers = self.cluster_size()
             );
         } else {
             tracing::info!(
                 action = "notEnoughVotes",
                 term = self.current_term(),
                 votes = votes,
-                peers = num_nodes
+                peers = self.cluster_size()
             );
         }
     }

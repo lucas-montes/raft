@@ -280,6 +280,17 @@ pub struct VoteResult {
     votes_granted: u64,
     failed_peers: Vec<usize>,
 }
+
+impl VoteResult{
+    pub fn votes_granted(&self) -> u64 {
+        self.votes_granted
+    }
+
+    pub fn failed_peers(&self) -> &[usize] {
+        &self.failed_peers
+    }
+}
+
 //TODO: get the errors when the term is lower than the one from the peer
 async fn collect_vote_results(
     tasks: &mut JoinSet<Result<VoteResponse, RequestError>>,
