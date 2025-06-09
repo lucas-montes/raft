@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
 use node::Node;
@@ -27,11 +27,13 @@ pub struct Cli {
     addr: SocketAddr,
     #[arg(short, long, num_args = 0..)]
     nodes: Vec<SocketAddr>,
+    #[arg(short, long, default_value = "data/state")]
+    state_path: PathBuf,
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    //     let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log");
+    // let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log");
     // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     tracing_subscriber::registry()
@@ -70,12 +72,8 @@ async fn main() {
             let server = Server::new(raft_tx, commands_tx, peers_tx.clone());
             let server_task = tokio::task::spawn_local(server.run(cli.addr));
 
-            let state = State::new(NodeId::new(cli.addr), "data/state");
+            let state = State::new(NodeId::new(cli.addr), cli.state_path);
 
-            //TODO: loop over nodes if any, check if they are up so you can join a cluster, otherwiser you are the cluster
-            // for node in nodes {
-            //     state.add_peer(node).await;
-            // }
             let service = Node::new(
                 state,
                 heartbeat_interval,
@@ -96,7 +94,7 @@ async fn main() {
                     tracing::info!("Server and client are running");
                 }
                 Err(err) => {
-                    tracing::error!("Error in main: {:?}", err);
+                    tracing::error!(err=?&err, "Error in main");
                 }
             };
         })

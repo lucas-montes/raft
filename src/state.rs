@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, fmt::Debug, io::BufWriter, net::SocketAddr, path::PathBuf, str::FromStr};
+use std::{cmp::Ordering, fmt::Debug, io::BufWriter, net::SocketAddr, path::{Path, PathBuf}, str::FromStr};
 
 use crate::{
     consensus::Consensus,
@@ -223,8 +223,8 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(id: NodeId, path: &str) -> Self {
-        let mut path = PathBuf::from(path);
+    pub fn new(id: NodeId, path: impl AsRef<Path>) -> Self {
+        let mut path = path.as_ref().to_path_buf();
         path.push(id.addr().to_string().replace(":", "_"));
         let mut hard_state = HardState::new(path);
         hard_state
