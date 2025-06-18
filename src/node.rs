@@ -128,6 +128,7 @@ impl<S: Consensus + PeersManagement> Node<S> {
 
         loop {
             tokio::select! {
+                // Calls to manage peers reconnection
                 Some(rpc) = self.peers_channel.recv() => {
                     self.state.add_peer(rpc);
                 }
@@ -139,7 +140,6 @@ impl<S: Consensus + PeersManagement> Node<S> {
 
                 // RPCs from the cluster's leader
                 Some(rpc) = self.raft_channel.recv() => {
-                    election_timeout.as_mut().reset(Instant::now() + election_dur);
                     match rpc {
                         RaftMsg::AppendEntries(req) => {
                             let msg = req.msg;
@@ -170,6 +170,7 @@ impl<S: Consensus + PeersManagement> Node<S> {
                             }
                         }
                     }
+                    election_timeout.as_mut().reset(Instant::now() + election_dur);
                 }
 
                 //TODO: maybe the following functions could be driven by the role and a trait

@@ -11,26 +11,6 @@ use crate::{
     storage::LogEntry,
 };
 
-pub trait RaftClient {
-    fn create_vote_request(&self) -> VoteRequest;
-    fn create_append_entries_request(&self) -> AppendEntriesRequest;
-    fn peers(&self) -> &Peers;
-}
-
-struct AppendEntriesRequest {
-    term: u64,
-    leader_id: String,
-    prev_log_index: u64,
-    prev_log_term: u64,
-    leader_commit: u64,
-}
-struct VoteRequest {
-    term: u64,
-    candidate_id: String,
-    last_log_index: u64,
-    last_log_term: u64,
-}
-
 struct RequestError {
     index: usize,
     error: capnp::Error,
@@ -59,6 +39,7 @@ async fn prepare_append_entries_tasks<S: Consensus + PeersManagement>(
 
     for (index, peer) in peers.iter().enumerate() {
         let client = peer.client();
+        //TODO: avoid the loops and create the request n times
 
         let mut request = client.append_entries_request();
 
@@ -281,7 +262,7 @@ pub struct VoteResult {
     failed_peers: Vec<usize>,
 }
 
-impl VoteResult{
+impl VoteResult {
     pub fn votes_granted(&self) -> u64 {
         self.votes_granted
     }

@@ -55,7 +55,7 @@ pub trait Consensus {
 
         let current_entries = &mut *self.log_entries();
 
-        // //2
+        // 2
         if !current_entries.previous_log_entry_is_up_to_date(prev_log_index, prev_log_term) {
             //TODO: when we return this error, the leader needs to know the last index/term of the
             //failing node so it can send the log entries to make him update
@@ -66,7 +66,8 @@ pub trait Consensus {
             };
         }
 
-        // //3 and 4
+        // 3 and 4
+        // TODO: send this as a message to avoid blocking?
         let result = current_entries.merge(entries);
 
         //5
