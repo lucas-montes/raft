@@ -143,7 +143,7 @@ impl HardState {
             Ok(message_reader) => message_reader,
             Err(err) => match err.kind {
                 capnp::ErrorKind::PrematureEndOfFile => {
-                    tracing::info!("hard state file is empty, creating new one");
+                    tracing::info!(action = "createHardState");
                     return Ok(());
                 }
                 _ => {
@@ -253,7 +253,7 @@ impl PeersManagement for State {
     }
 
     fn remove_peer(&mut self, index: usize) -> Peer {
-        todo!()
+        self.peers.remove(index)
     }
 
     fn peers(&self) -> &Peers {

@@ -75,8 +75,8 @@ async fn send_append_entries(
         Ok(r) => r,
         Err(err) => {
             tracing::error!(
-                "error from evaluating the reply send_append_entries: {:?}",
-                err
+                err=?err,
+                "error from send_append_entries getting the response",
             );
             return Err(RequestError { index, error: err });
         }
@@ -86,8 +86,8 @@ async fn send_append_entries(
         Ok(r) => r.get_response(),
         Err(err) => {
             tracing::error!(
-                "error from send_append_entries getting the response: {:?}",
-                err
+                err=?err,
+                "error from send_append_entries getting the response",
             );
             return Err(RequestError { index, error: err });
         }
@@ -97,8 +97,8 @@ async fn send_append_entries(
         Ok(r) => r.try_into(),
         Err(err) => {
             tracing::error!(
-                "error from send_append_entries getting the response: {:?}",
-                err
+                err=?err,
+                "error from send_append_entries getting the response",
             );
             return Err(RequestError { index, error: err });
         }
@@ -108,8 +108,8 @@ async fn send_append_entries(
         Ok(r) => Ok(r),
         Err(err) => {
             tracing::error!(
-                "error from send_append_entries getting the response: {:?}",
-                err
+                err=?err,
+                "error from send_append_entries getting the response",
             );
             Err(RequestError { index, error: err })
         }
@@ -151,7 +151,7 @@ async fn manage_append_entries_tasks(
         let task_result = match res {
             Ok(response) => response,
             Err(err) => {
-                tracing::error!("error in manage_append_entries_tasks: {:?}", err);
+                tracing::error!(err=?err, "error in manage_append_entries_tasks");
                 continue;
             }
         };
@@ -227,8 +227,8 @@ async fn send_vote(
         Ok(r) => r,
         Err(err) => {
             tracing::error!(
-                "error from evaluating the reply send_vote_request: {:?}",
-                err
+                err=?err,
+                "error from send_vote_request getting the response",
             );
             return Err(RequestError { index, error: err });
         }
@@ -238,8 +238,8 @@ async fn send_vote(
         Ok(r) => r.get_response(),
         Err(err) => {
             tracing::error!(
-                "error from send_vote_request getting the response: {:?}",
-                err
+                err=?err,
+                "error from send_vote_request getting the response",
             );
             return Err(RequestError { index, error: err });
         }
@@ -249,8 +249,8 @@ async fn send_vote(
         Ok(r) => Ok(r.into()),
         Err(err) => {
             tracing::error!(
-                "error from send_vote_request getting the response: {:?}",
-                err
+                err=?err,
+                "error from send_vote_request getting the response",
             );
             Err(RequestError { index, error: err })
         }
@@ -282,26 +282,18 @@ async fn collect_vote_results(
 
     while let Some(joined) = tasks.join_next().await {
         match joined {
-            // The task itself panicked or was cancelled (JoinError)
+            // The task itself panicked or was cancelled
             Err(join_error) => {
-                tracing::error!("JoinSet task failed: {:?}", join_error);
+                tracing::error!(err=?join_error, "JoinSet task failed");
                 // We don't know which peer index that was; skip
                 continue;
             }
 
-            // The task completed; now look at its Result<VoteResponse, RequestError>
             Ok(task_result) => match task_result {
-                // RPC succeeded and gave us a VoteResponse
                 Ok(vote_resp) => {
                     votes_granted += vote_resp.vote_granted() as u64;
                 }
-                // RPC errored (network failure, etc.)
                 Err(req_err) => {
-                    tracing::warn!(
-                        "Peer {} had RPC failure: {:?}",
-                        req_err.index,
-                        req_err.error
-                    );
                     failed_peers.push(req_err.index);
                 }
             },

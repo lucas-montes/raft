@@ -1,11 +1,16 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Parser;
+use client::create_client;
+use consensus::Consensus;
 use node::Node;
-use peers::PeersReconnectionTask;
+use peers::{PeersDisconnected, PeersReconnectionTask};
+use raft_capnp::raft;
 use rand::random_range;
 use server::Server;
 use state::{NodeId, State};
+use storage::LogsInformation;
+use tokio::sync::mpsc::Sender;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 pub mod raft_capnp {
@@ -91,7 +96,13 @@ async fn main() {
             let (peers_task_tx, peers_task_rx) =
                 tokio::sync::mpsc::channel(cli.peers_task_channel_size);
 
+            let server = Server::new(raft_tx, commands_tx, peers_tx.clone());
+            let join_cluster_client = capnp_rpc::new_client(server.clone());
+            let server_task = tokio::task::spawn_local(server.run(cli.addr));
+
             let state = State::new(NodeId::new(cli.addr), cli.state_path);
+             let log_info = state.last_log_info();
+
             let service = Node::new(
                 state,
                 heartbeat_interval,
@@ -101,27 +112,22 @@ async fn main() {
                 peers_rx,
                 peers_task_tx.clone(),
             );
+
+
+
+            let node_task = tokio::task::spawn_local(service.run());
+
             let reconnection_task = PeersReconnectionTask::new(
                 peers_task_rx,
-                peers_tx.clone(),
+                peers_tx,
                 cli.peer_connection_backoff,
                 cli.peer_connection_max_backoff,
             );
-            let server = Server::new(raft_tx, commands_tx, peers_tx);
-
-            let server_task = tokio::task::spawn_local(server.run(cli.addr));
-            let client_task = tokio::task::spawn_local(service.run());
             let peers_task = tokio::task::spawn_local(reconnection_task.run());
 
-            //Connect to peers in the cluster
-            peers_task_tx
-                .send(peers::PeersDisconnected::new(cli.nodes.into_iter().map(
-                    |addr| peers::PeerDisconnected::new(NodeId::new(addr), addr),
-                )))
-                .await
-                .expect("Failed to send initial peers");
+            join_cluster(cli.addr, log_info, join_cluster_client, cli.nodes, peers_task_tx).await;
 
-            match tokio::try_join!(server_task, client_task, peers_task) {
+            match tokio::try_join!(server_task, node_task, peers_task) {
                 Ok(_) => {
                     tracing::info!("Server and client are running");
                 }
@@ -131,4 +137,65 @@ async fn main() {
             };
         })
         .await;
+}
+
+async fn join_cluster(
+    addr: SocketAddr,
+    log_info: LogsInformation,
+    client: raft::Client,
+    nodes: Vec<SocketAddr>,
+    peers_task_tx: Sender<PeersDisconnected>,
+) {
+    if nodes.is_empty() {
+        //No nodes provided, running as a single node
+        return;
+    }
+
+    let cluster_addr = nodes
+        .first()
+        .expect("At least one node must be provided")
+        ;
+
+    let cluster_client = create_client(&cluster_addr).await.expect("Failed to create client for the cluster connection");
+
+    let mut req = cluster_client
+        .get_leader_request()
+        .send()
+        .pipeline
+        .get_leader()
+        .join_cluster_request();
+    let mut history = req.get().init_history();
+    history.set_last_log_index(log_info.last_log_index());
+    history.set_last_log_term(log_info.last_log_term());
+
+    let addr = addr.to_string();
+    let mut peer = req.get().init_peer();
+    peer.set_address(&addr);
+    peer.set_id(&addr);
+    peer.set_client(client);
+
+    match req
+        .send()
+        .promise
+        .await {
+            Ok(response) => {
+                let response = response.get();
+                if let Err(err) = response {
+                    tracing::error!(error = ?err, "Failed to join cluster");
+                    return;
+                }
+                tracing::info!("Successfully joined cluster");
+            }
+            Err(err) => {
+                tracing::error!(error = ?err, "Failed to join cluster");
+                return;
+            }
+        };
+
+    //   peers_task_tx
+    //                 .send(peers::PeersDisconnected::new(nodes.into_iter().map(
+    //                     |addr| peers::PeerDisconnected::new(NodeId::new(addr), addr),
+    //                 )))
+    //                 .await
+    //                 .expect("Failed to send initial peers");
 }

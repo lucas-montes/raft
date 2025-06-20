@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    extract::{
+    extract::{connect_info::ConnectInfo,
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
@@ -18,35 +18,48 @@ use tokio::{
     },
 };
 
-use std::{collections::HashMap, process::Stdio, sync::Arc};
-use std::{net::SocketAddr, path::PathBuf};
+use std::{collections::HashMap, process::Stdio, sync::Arc, net::SocketAddr, path::PathBuf};
 use tower_http::services::ServeDir;
-
-//allows to extract the IP of connecting user
-use axum::extract::connect_info::ConnectInfo;
-
-//allows to split the websocket stream into separate TX and RX branches
 use futures::{sink::SinkExt, stream::StreamExt};
 
 #[derive(Clone)]
 struct ClusterState {
-    nodes: Arc<RwLock<HashMap<String, NodeInfo>>>,
+    nodes: Arc<RwLock<HashMap<SocketAddr, NodeInfo>>>,
     front_transmission: Option<Sender<ServerLogType>>,
 }
 
+impl ClusterState {
+    fn new() -> Self {
+        ClusterState {
+            nodes: Arc::new(RwLock::new(HashMap::new())),
+            front_transmission: None,
+        }
+    }
+
+    async fn get_nodes(&self) -> Vec<String> {
+        self.nodes.read().await
+            .keys()
+            .map(|addr| addr.to_string())
+            .collect()
+    }
+}
+
 struct NodeInfo {
-    address: String,
-    port: String,
     process: Child,
+}
+
+impl NodeInfo {
+    fn new(process: Child) -> Self {
+        NodeInfo {
+            process,
+        }
+    }
 }
 
 fn app() -> Router {
     let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates");
 
-    let state = ClusterState {
-        nodes: Arc::new(RwLock::new(HashMap::new())),
-        front_transmission: None,
-    };
+    let state = ClusterState::new();
 
     Router::new()
         .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
@@ -69,9 +82,8 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterSta
     let (tx, mut rx) = mpsc::channel(100);
 
     state.front_transmission = Some(tx);
-    let state2 = state.clone();
 
-    let mut command_task = tokio::spawn(async move {
+    tokio::spawn(async move {
         while let Some(Ok(msg)) = socket_receiver.next().await {
             if let Message::Text(text) = msg {
                 match serde_json::from_str::<FrontendCommand>(&text) {
@@ -80,7 +92,7 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterSta
                             spawn_node(port, addr, &state).await;
                         }
                         FrontendCommand::RemoveNode { id } => {
-                            remove_node(id, &state).await;
+                            remove_node(id.parse().expect("addr should be valid"), &state).await;
                         }
                     },
                     Err(e) => {
@@ -109,11 +121,6 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterSta
     });
 
 
-    //TODO: delete once the tests finished
-    for addr in 0..3{
-        let port = (4000 + addr).to_string();
-        spawn_node(port, "127.0.0.1".into(), &state2).await;
-    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -125,7 +132,6 @@ enum FrontendCommand {
 
 #[tokio::main]
 async fn main() {
-    // build our application with some routes
     let app = app();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
@@ -142,7 +148,7 @@ async fn main() {
 
 #[derive(Serialize, Deserialize)]
 struct ServerLogSpan {
-    addr: String,
+    addr: SocketAddr,
     name: String,
 }
 
@@ -167,6 +173,9 @@ enum ServerLogType {
     BecomeCandidate(ServerLog),
     BecomeFollower(ServerLog),
     BecomeLeader(ServerLog),
+    CreateHardState(ServerLog),
+    PeerReconnectedSuccessfully(ServerLog),
+    RequestJoinCluster(ServerLog),
 }
 
 async fn spawn_node(port: String, address: String, state: &ClusterState) {
@@ -174,11 +183,9 @@ async fn spawn_node(port: String, address: String, state: &ClusterState) {
     println!("new node: {}", &full_addr);
     let mut cmd = Command::new("../target/debug/raft")
         .arg("--addr")
-        .arg(full_addr.clone())
+        .arg(&full_addr)
         .arg("--nodes")
-        .arg("127.0.0.1:4000")
-        .arg("127.0.0.1:4001")
-        .arg("127.0.0.1:4002")
+        .args(state.get_nodes().await)
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
@@ -202,19 +209,14 @@ async fn spawn_node(port: String, address: String, state: &ClusterState) {
     });
 
     state.nodes.write().await.insert(
-        full_addr,
-        NodeInfo {
-            port,
-            address,
-            process: cmd,
-        },
+        full_addr.parse().expect("the address should be valid"),
+        NodeInfo::new(cmd)
     );
 }
 
-// Remove a node
-async fn remove_node(id: String, state: &ClusterState) {
+async fn remove_node(addr: SocketAddr, state: &ClusterState) {
     let mut nodes = state.nodes.write().await;
-    if let Some(mut node) = nodes.remove(&id) {
+    if let Some(mut node) = nodes.remove(&addr) {
         node.process.kill().await.unwrap();
     }
 }

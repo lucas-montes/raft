@@ -23,6 +23,22 @@
         rust-bin-custom = pkgs.rust-bin.stable.latest.default.override {
           extensions = ["rust-src"];
         };
+
+        run-raft = pkgs.writeShellScriptBin "run-raft" ''
+        set -e
+          echo "Building Rust Raft implementation..."
+          cargo build
+
+            if [ $? -ne 0 ]; then
+            echo "❌ Main Raft build failed!"
+            exit 1
+          fi
+
+          echo "Starting visual frontend..."
+          cd visual
+          cargo run
+        '';
+
       in {
         devShells.default = with pkgs;
           mkShell {
@@ -31,15 +47,10 @@
               cargo-watch
               capnproto
               pkg-config
-              cudaPackages.cudatoolkit
-              cudaPackages.cuda_nvcc
-              linuxPackages.nvidia_x11
-              dbus
               rust-bin-custom
+run-raft
             ];
-            LD_LIBRARY_PATH = "${pkgs.linuxPackages.nvidia_x11}/lib:${pkgs.cudaPackages.cudatoolkit}/lib";
 
-            CUDA_ROOT = "${pkgs.cudaPackages.cudatoolkit}";
           };
       }
     );

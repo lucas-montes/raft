@@ -1,17 +1,76 @@
+/**
+ * @fileoverview Raft visualization frontend with WebSocket communication
+ * @author Lucas
+ */
+
+/**
+ * @typedef {Object} Node
+ * @property {'leader'|'follower'|'candidate'} role - The node's current role
+ * @property {number} term - Current term number
+ * @property {number} commitIndex - Index of highest log entry known to be committed
+ * @property {number} x - X coordinate for visualization
+ * @property {number} y - Y coordinate for visualization
+ * @property {'active'|'joining'|'disconnected'} status - Node connection status
+ * @property {string} addr - Node address (IP:port)
+ */
+
+/**
+ * @typedef {Object} ServerLog
+ * @property {string} action - The action that occurred
+ * @property {string} timestamp - When the action occurred
+ * @property {string} addr - Address of the node
+ * @property {string} name - Span name
+ */
+
+/**
+ * @typedef {Object} MessageAnimation
+ * @property {number} startX - Starting X coordinate
+ * @property {number} startY - Starting Y coordinate
+ * @property {number} endX - Ending X coordinate
+ * @property {number} endY - Ending Y coordinate
+ * @property {number} currentX - Current X coordinate
+ * @property {number} currentY - Current Y coordinate
+ * @property {'vote'|'append'|'heartbeat'} type - Type of message
+ * @property {number} progress - Animation progress (0-1)
+ * @property {number} duration - Animation duration in milliseconds
+ * @property {number} startTime - Animation start time
+ */
+
+/**
+ * @typedef {Object} LogData
+ * @property {string} action - The action performed
+ * @property {string} timestamp - Timestamp of the action
+ * @property {Object} span - Span information
+ * @property {string} span.addr - Node address
+ * @property {string} span.name - Span name
+ */
+
 // WebSocket connection to Axum backend
+/** @type {WebSocket} */
 const ws = new WebSocket('ws://localhost:3000/ws');
 
 // Store cluster state
+/** @type {Object<string, Node>} */
 let nodes = {}; // { node_id: { role, term, commit_index, x, y, status, addr } }
+
+/** @type {ServerLog[]} */
 let serverLogs = []; // Store server log messages
+
+/** @type {MessageAnimation[]} */
 let messageAnimations = []; // Store active message animations
 
 // Canvas for message animations
-let canvas, ctx;
+/** @type {HTMLCanvasElement|null} */
+let canvas = null;
 
-// Initialize canvas after DOM loads
+/** @type {CanvasRenderingContext2D|null} */
+let ctx = null;
+
+/**
+ * Initialize canvas after DOM loads
+ */
 document.addEventListener('DOMContentLoaded', () => {
-    canvas = document.getElementById('message-canvas');
+    canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('message-canvas'));
     ctx = canvas.getContext('2d');
     resizeCanvas();
     startAnimationLoop();
@@ -23,7 +82,12 @@ ws.onopen = () => {
     updateConnectionStatus('Connected');
 };
 
+/**
+ * Handle incoming WebSocket messages
+ * @param {MessageEvent} event - The WebSocket message event
+ */
 ws.onmessage = (event) => {
+    /** @type {LogData} */
     const data = JSON.parse(event.data);
 
     // Handle ServerLogType messages (the only messages from backend)
@@ -34,6 +98,10 @@ ws.onmessage = (event) => {
     }
 };
 
+/**
+ * Handle WebSocket errors
+ * @param {Event} error - The error event
+ */
 ws.onerror = (error) => {
     console.error('WebSocket error:', error);
     updateConnectionStatus('Error: Disconnected');
@@ -43,10 +111,12 @@ ws.onclose = () => {
     updateConnectionStatus('Disconnected');
 };
 
-// Handle server log messages from backend
+/**
+ * Handle server log messages from backend
+ * @param {LogData} logData - The log data received from server
+ */
 function handleServerLog(logData) {
     const { action, timestamp, span } = logData;
-
 
     if (!action || !span) {
         console.error('Invalid log data:', logData);
@@ -103,7 +173,11 @@ function handleServerLog(logData) {
     }
 }
 
-// Update node role based on server logs
+/**
+ * Update node role based on server logs
+ * @param {string} addr - Node address
+ * @param {'leader'|'follower'|'candidate'} role - New role for the node
+ */
 function updateNodeFromLog(addr, role) {
     if (!nodes[addr]) {
         initializeNodeFromLog(addr);
@@ -113,7 +187,10 @@ function updateNodeFromLog(addr, role) {
     updateStatus();
 }
 
-// Initialize a new node from log data
+/**
+ * Initialize a new node from log data
+ * @param {string} addr - Node address
+ */
 function initializeNodeFromLog(addr) {
     if (!nodes[addr]) {
         // Calculate position in a circle for better layout
@@ -141,7 +218,12 @@ function initializeNodeFromLog(addr) {
     }
 }
 
-// Animate message between nodes
+/**
+ * Animate message between nodes
+ * @param {string} fromAddr - Source node address
+ * @param {string|null} toAddr - Target node address (null for broadcast)
+ * @param {'vote'|'append'|'heartbeat'} messageType - Type of message to animate
+ */
 function animateMessage(fromAddr, toAddr, messageType) {
     const fromNode = nodes[fromAddr];
     if (!fromNode) return;
@@ -161,8 +243,14 @@ function animateMessage(fromAddr, toAddr, messageType) {
     }
 }
 
-// Create a single message animation
+/**
+ * Create a single message animation
+ * @param {Node} fromNode - Source node
+ * @param {Node} toNode - Target node
+ * @param {'vote'|'append'|'heartbeat'} messageType - Type of message
+ */
 function createMessageAnimation(fromNode, toNode, messageType) {
+    /** @type {MessageAnimation} */
     const message = {
         startX: fromNode.x + 40,
         startY: fromNode.y + 40,
@@ -179,7 +267,9 @@ function createMessageAnimation(fromNode, toNode, messageType) {
     messageAnimations.push(message);
 }
 
-// Animation loop
+/**
+ * Start the animation loop for message animations
+ */
 function startAnimationLoop() {
     function animate() {
         if (ctx && canvas) {
@@ -231,9 +321,11 @@ function startAnimationLoop() {
     animate();
 }
 
-// Render server logs in UI
+/**
+ * Render server logs in UI
+ */
 function renderServerLogs() {
-    const serverLogsDiv = document.getElementById('server-logs');
+    const serverLogsDiv = /** @type {HTMLElement|null} */ (document.getElementById('server-logs'));
     if (!serverLogsDiv) return;
 
     // Keep the header and create/update content
@@ -272,9 +364,11 @@ function renderServerLogs() {
     });
 }
 
-// Render nodes as <div> elements
+/**
+ * Render nodes as DOM elements
+ */
 function renderNodes() {
-    const nodesDiv = document.getElementById('nodes');
+    const nodesDiv = /** @type {HTMLElement|null} */ (document.getElementById('nodes'));
     if (!nodesDiv) return;
 
     // Clear existing nodes but keep canvas
@@ -295,17 +389,22 @@ function renderNodes() {
     });
 }
 
-// Update connection status
+/**
+ * Update connection status display
+ * @param {string} status - Status message to display
+ */
 function updateConnectionStatus(status) {
-    const statusDiv = document.getElementById('status');
+    const statusDiv = /** @type {HTMLElement|null} */ (document.getElementById('status'));
     if (statusDiv) {
         statusDiv.textContent = status;
     }
 }
 
-// Update cluster status
+/**
+ * Update cluster status information
+ */
 function updateStatus() {
-    const statusDiv = document.getElementById('status');
+    const statusDiv = /** @type {HTMLElement|null} */ (document.getElementById('status'));
     if (!statusDiv) return;
 
     const leader = Object.entries(nodes).find(([id, node]) => node.role === 'leader')?.[0] || 'None';
@@ -316,9 +415,11 @@ function updateStatus() {
     statusDiv.textContent = `${connectionStatus} | Nodes: ${nodeCount} | Leader: ${leader} | Quorum: ${quorum}`;
 }
 
-// Update remove node dropdown
+/**
+ * Update remove node dropdown options
+ */
 function updateRemoveNodeOptions() {
-    const select = document.getElementById('remove-node-select');
+    const select = /** @type {HTMLSelectElement|null} */ (document.getElementById('remove-node-select'));
     if (!select) return;
 
     select.innerHTML = '<option value="">Select node to remove</option>';
@@ -330,13 +431,29 @@ function updateRemoveNodeOptions() {
     });
 }
 
+/**
+ * Initialize canvas size based on container
+ */
+function resizeCanvas() {
+    const canvas = /** @type {HTMLCanvasElement|null} */ (document.getElementById('message-canvas'));
+    const nodesDiv = /** @type {HTMLElement|null} */ (document.getElementById('nodes'));
+    if (canvas && nodesDiv) {
+        canvas.width = nodesDiv.clientWidth;
+        canvas.height = nodesDiv.clientHeight;
+    }
+}
+
+// Event Listeners
 // Handle add node form submission
-const addNodeForm = document.getElementById('add-node-form');
+const addNodeForm = /** @type {HTMLFormElement|null} */ (document.getElementById('add-node-form'));
 if (addNodeForm) {
     addNodeForm.addEventListener('submit', (e) => {
         e.preventDefault();
-        const addr = document.getElementById('node-addr').value;
-        const port = document.getElementById('node-port').value;
+        const addrInput = /** @type {HTMLInputElement} */ (document.getElementById('node-addr'));
+        const portInput = /** @type {HTMLInputElement} */ (document.getElementById('node-port'));
+
+        const addr = addrInput.value;
+        const port = portInput.value;
 
         if (addr && port) {
             ws.send(JSON.stringify({ action: 'addNode', addr, port }));
@@ -346,10 +463,11 @@ if (addNodeForm) {
 }
 
 // Handle remove node button click
-const removeNodeBtn = document.getElementById('remove-node-btn');
+const removeNodeBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('remove-node-btn'));
 if (removeNodeBtn) {
     removeNodeBtn.addEventListener('click', () => {
-        const id = document.getElementById('remove-node-select').value;
+        const select = /** @type {HTMLSelectElement} */ (document.getElementById('remove-node-select'));
+        const id = select.value;
         if (id) {
             ws.send(JSON.stringify({ action: 'removeNode', id }));
             // Remove from local state immediately for better UX
@@ -361,18 +479,8 @@ if (removeNodeBtn) {
     });
 }
 
-
-// Initialize canvas size
-function resizeCanvas() {
-    const canvas = document.getElementById('message-canvas');
-    const nodesDiv = document.getElementById('nodes');
-    if (canvas && nodesDiv) {
-        canvas.width = nodesDiv.clientWidth;
-        canvas.height = nodesDiv.clientHeight;
-    }
-}
-
 window.addEventListener('resize', resizeCanvas);
+
 // Initial setup
 document.addEventListener('DOMContentLoaded', () => {
     resizeCanvas();

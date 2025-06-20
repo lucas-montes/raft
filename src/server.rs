@@ -186,6 +186,12 @@ impl raft::Server for Server {
 
         let msg = Peer::new(id, addr, client);
 
+        //         let msg = PeersDisconnected::new(vec![PeerDisconnected::new(
+        //     id.into(), addr
+        // )].into_iter());
+
+        tracing::info!(action = "requestJoinCluster", peer = %addr, id = %id);
+
         let channel = self.peers_channel.clone();
         Promise::from_future(async move {
             channel.send(msg.into()).await.expect("msg not sent");

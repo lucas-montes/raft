@@ -48,11 +48,6 @@ impl Peer {
 pub struct Peers(Vec<Peer>);
 
 impl Peers {
-    pub fn disconnect(&mut self, index: usize) {
-        //TODO: add some awaking and background task mechanism to reconnect nodes
-        let _peer = self.0.remove(index);
-    }
-
     pub fn total_connected(&self) -> usize {
         self.0.len()
     }
@@ -183,26 +178,15 @@ impl PeersReconnectionTask {
         peer_disconnected: PeerDisconnected,
     ) -> NewPeer {
         let addr = peer_disconnected.addr;
-        tracing::info!(action = "attempting_reconnection", peer = %addr);
-
         loop {
             match create_client(&addr).await {
                 Ok(client) => {
-                    tracing::info!(action = "peer_reconnected_successfully", peer = %addr);
+                    tracing::info!(action = "peerReconnectedSuccessfully", peer = %addr);
                     let peer = Peer::new(peer_disconnected.id, addr, client);
                     return NewPeer::from(peer);
                 }
                 Err(e) => {
-                    tracing::debug!(
-                        action = "reconnection_attempt_failed",
-                        peer = %addr,
-                        error = ?e,
-                        backoff_ms = backoff_ms
-                    );
-
                     tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-
-                    // Exponential backoff with jitter
                     backoff_ms = std::cmp::min(backoff_ms * 2, max_backoff_ms);
                 }
             }
