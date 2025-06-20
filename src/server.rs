@@ -175,6 +175,7 @@ impl raft::Server for Server {
         let request = pry!(params.get());
 
         pry!(request.get_history());
+        //TODO: check that the peer can join, that the history is correct, etc...
         let peer = pry!(request.get_peer());
 
         let client = pry!(peer.get_client());

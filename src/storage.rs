@@ -45,7 +45,7 @@ impl Ord for LogEntry {
         self.index.cmp(&other.index)
     }
 }
-
+#[derive(Debug, Default)]
 pub struct LogsInformation {
     last_log_index: u64,
     last_log_term: u64,

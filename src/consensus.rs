@@ -161,460 +161,317 @@ pub trait Consensus {
     fn role(&self) -> &Role;
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-
-//     #[test]
-//     fn test_handle_append_entries_term_lower_than_current_follower() {
-//         let mut service = State::default();
-//         service.current_term = 1;
-
-//         let response = service.handle_append_entries(0, "127.0.0.1:4000", 0, 0, 0, vec![]);
-
-//         match response.unwrap_err() {
-//             AppendEntriesError::TermMismatch(term) => {
-//                 assert_eq!(term, 1);
-//             }
-//             _ => panic!("Expected TermMismatch error"),
-//         }
-
-//         assert_eq!(service.current_term, 1);
-//         assert_eq!(service.voted_for, None);
-//         assert_eq!(service.log_entries.len(), 0);
-//         assert_eq!(service.commit_index, 0);
-//         assert_eq!(service.last_applied, 0);
-//         assert_eq!(service.role, Role::Follower);
-//         assert_eq!(
-//             service.addr,
-//             SocketAddr::from_str("127.0.0.1:4000").unwrap()
-//         );
-//         assert_eq!(service.leader, None);
-//     }
-
-//     #[test]
-//     fn test_handle_append_entries_term_lower_than_current_candidate() {
-//         let remote = Some(SocketAddr::from_str("127.0.0.1:4003").unwrap());
-//         let mut service = State::default();
-//         service.current_term = 1;
-//         service.role = Role::Candidate;
-//         service.voted_for = remote;
-//         service.leader = remote;
-
-//         let response = service.handle_append_entries(0, "127.0.0.1:4000", 0, 0, 0, vec![]);
-
-//         match response.unwrap_err() {
-//             AppendEntriesError::TermMismatch(term) => {
-//                 assert_eq!(term, 1);
-//             }
-//             _ => panic!("Expected TermMismatch error"),
-//         }
-//         assert_eq!(service.current_term, 1);
-//         assert_eq!(service.voted_for, remote);
-//         assert_eq!(service.log_entries.len(), 0);
-//         assert_eq!(service.commit_index, 0);
-//         assert_eq!(service.last_applied, 0);
-//         assert_eq!(service.role, Role::Candidate);
-//         assert_eq!(
-//             service.addr,
-//             SocketAddr::from_str("127.0.0.1:4000").unwrap()
-//         );
-//         assert_eq!(service.leader, remote);
-//     }
-
-//     #[test]
-//     fn test_handle_append_entries_log_index_mismatch_follower() {
-//         let remote = Some(SocketAddr::from_str("127.0.0.1:4003").unwrap());
-//         let mut service = State::default();
-//         service.current_term = 1;
-//         service.voted_for = remote;
-//         service.leader = remote;
-//         service.log_entries = LogEntries(vec![LogEntry::new(0, 1, "command1".to_string())]);
-
-//         let entries = vec![LogEntry::new(2, 1, "command2".to_string())];
-
-//         let response = service.handle_append_entries(1, "127.0.0.1:4003", 1, 1, 1, entries);
-
-//         match response.unwrap_err() {
-//             AppendEntriesError::LogEntriesMismatch {
-//                 last_index,
-//                 last_term,
-//             } => {
-//                 assert_eq!(last_index, 0);
-//                 assert_eq!(last_term, 1);
-//             }
-//             _ => panic!("Expected LogEntriesMismatch error"),
-//         }
-
-//         assert_eq!(service.current_term, 1);
-//         assert_eq!(service.voted_for, None);
-//         assert_eq!(service.log_entries.len(), 1);
-//         assert_eq!(service.log_entries[0].index, 0);
-//         assert_eq!(service.log_entries[0].term, 1);
-//         assert_eq!(service.log_entries[0].command, "command1");
-//         assert_eq!(service.commit_index, 0);
-//         assert_eq!(service.last_applied, 0);
-//         assert_eq!(service.role, Role::Follower);
-//         assert_eq!(
-//             service.addr,
-//             SocketAddr::from_str("127.0.0.1:4000").unwrap()
-//         );
-//         assert_eq!(service.leader, remote);
-//     }
-
-//     #[test]
-//     fn test_handle_append_entries_log_index_mismatch_candidate() {
-//         let remote = Some(SocketAddr::from_str("127.0.0.1:4004").unwrap());
-//         let mut service = State::default();
-//         service.current_term = 1;
-//         service.voted_for = remote;
-//         service.role = Role::Candidate;
-//         service.leader = remote;
-//         service.log_entries = LogEntries(vec![LogEntry::new(0, 1, "command1".to_string())]);
-
-//         let entries = vec![LogEntry::new(2, 1, "command2".to_string())];
-
-//         let response = service.handle_append_entries(1, "127.0.0.1:4003", 1, 1, 1, entries);
-
-//         match response.unwrap_err() {
-//             AppendEntriesError::LogEntriesMismatch {
-//                 last_index,
-//                 last_term,
-//             } => {
-//                 assert_eq!(last_index, 0);
-//                 assert_eq!(last_term, 1);
-//             }
-//             _ => panic!("Expected LogEntriesMismatch error"),
-//         }
-//         assert_eq!(service.current_term, 1);
-//         assert_eq!(service.voted_for, None);
-//         assert_eq!(service.log_entries.len(), 1);
-//         assert_eq!(service.log_entries[0].index, 0);
-//         assert_eq!(service.log_entries[0].term, 1);
-//         assert_eq!(service.log_entries[0].command, "command1");
-//         assert_eq!(service.commit_index, 0);
-//         assert_eq!(service.last_applied, 0);
-//         assert_eq!(service.role, Role::Follower);
-//         assert_eq!(
-//             service.addr,
-//             SocketAddr::from_str("127.0.0.1:4000").unwrap()
-//         );
-//         assert_eq!(
-//             service.leader,
-//             Some(SocketAddr::from_str("127.0.0.1:4003").unwrap())
-//         );
-//     }
-
-//     #[test]
-//     fn test_handle_append_entries_log_term_mismatch_candidate() {
-//         let remote = Some(SocketAddr::from_str("127.0.0.1:4004").unwrap());
-//         let mut service = State::default();
-//         service.current_term = 1;
-//         service.voted_for = remote;
-//         service.role = Role::Candidate;
-//         service.leader = remote;
-//         service.log_entries = LogEntries(vec![LogEntry::new(0, 1, "command1".to_string())]);
-
-//         let entries = vec![LogEntry::new(1, 2, "command2".to_string())];
-
-//         let response = service.handle_append_entries(2, "127.0.0.1:4003", 0, 2, 1, entries);
-
-//         match response.unwrap_err() {
-//             AppendEntriesError::LogEntriesMismatch {
-//                 last_index,
-//                 last_term,
-//             } => {
-//                 assert_eq!(last_index, 0);
-//                 assert_eq!(last_term, 1);
-//             }
-//             _ => panic!("Expected LogEntriesMismatch error"),
-//         }
-
-//         assert_eq!(service.current_term, 2);
-//         assert_eq!(service.voted_for, None);
-//         assert_eq!(service.log_entries.len(), 1);
-//         assert_eq!(service.log_entries[0].index, 0);
-//         assert_eq!(service.log_entries[0].term, 1);
-//         assert_eq!(service.log_entries[0].command, "command1");
-//         assert_eq!(service.commit_index, 0);
-//         assert_eq!(service.last_applied, 0);
-//         assert_eq!(service.role, Role::Follower);
-//         assert_eq!(
-//             service.addr,
-//             SocketAddr::from_str("127.0.0.1:4000").unwrap()
-//         );
-//         assert_eq!(
-//             service.leader,
-//             Some(SocketAddr::from_str("127.0.0.1:4003").unwrap())
-//         );
-//     }
-
-//     #[test]
-//     fn test_handle_append_entries_update_commit_index() {
-//         let remote = Some(SocketAddr::from_str("127.0.0.1:4004").unwrap());
-//         let mut service = State::default();
-//         service.current_term = 1;
-//         service.voted_for = remote;
-//         service.role = Role::Candidate;
-//         service.leader = remote;
-//         service.log_entries = LogEntries(vec![LogEntry::new(0, 1, "command1".to_string())]);
-
-//         let entries = vec![LogEntry::new(1, 2, "command2".to_string())];
-
-//         let response = service.handle_append_entries(2, "127.0.0.1:4003", 0, 1, 1, entries);
-
-//         assert!(response.is_ok());
-//         assert_eq!(service.current_term, 2);
-//         assert_eq!(service.voted_for, None);
-//         assert_eq!(service.log_entries.len(), 2);
-//         assert_eq!(service.log_entries[0].index, 0);
-//         assert_eq!(service.log_entries[0].term, 1);
-//         assert_eq!(service.log_entries[0].command, "command1");
-//         assert_eq!(service.log_entries[1].index, 1);
-//         assert_eq!(service.log_entries[1].term, 2);
-//         assert_eq!(service.log_entries[1].command, "command2");
-//         assert_eq!(service.commit_index, 1);
-//         assert_eq!(service.last_applied, 0);
-//         assert_eq!(service.role, Role::Follower);
-//         assert_eq!(
-//             service.addr,
-//             SocketAddr::from_str("127.0.0.1:4000").unwrap()
-//         );
-//         assert_eq!(
-//             service.leader,
-//             Some(SocketAddr::from_str("127.0.0.1:4003").unwrap())
-//         );
-//     }
-
-//     // #[test]
-//     // fn test_new_log_entry() {
-//     //     let mut entries = LogEntries::default();
-//     //     entries.new_entry(1, "command1".to_string());
-
-//     //     assert_eq!(entries[0].index, 0);
-//     //     assert_eq!(entries[0].term, 1);
-//     //     assert_eq!(entries[0].command, "command1");
-//     // }
-
-//     // #[test]
-//     // fn test_new_log_entry_new_index() {
-//     //     let mut entries = LogEntries::default();
-//     //     entries.new_entry(1, "command1".to_string());
-//     //     entries.new_entry(1, "command2".to_string());
-
-//     //     assert_eq!(entries[0].index, 0);
-//     //     assert_eq!(entries[0].term, 1);
-//     //     assert_eq!(entries[0].command, "command1");
-
-//     //     assert_eq!(entries[1].index, 1);
-//     //     assert_eq!(entries[1].term, 1);
-//     //     assert_eq!(entries[1].command, "command2");
-//     // }
-
-//     #[test]
-//     fn test_previous_log_entry_is_up_to_date_correct() {
-//         let entries = LogEntries(vec![
-//             LogEntry::new(0, 1, "command1".to_string()),
-//             LogEntry::new(1, 1, "command2".to_string()),
-//         ]);
-
-//         let is_up_to_date = entries.previous_log_entry_is_up_to_date(1, 1);
-//         assert!(is_up_to_date);
-//     }
-
-//     #[test]
-//     fn test_previous_log_entry_is_up_to_date_no_index() {
-//         let entries = LogEntries::default();
-
-//         let is_up_to_date = entries.previous_log_entry_is_up_to_date(1, 1);
-//         assert!(!is_up_to_date);
-//     }
-
-//     #[test]
-//     fn test_previous_log_entry_is_up_to_date_no_term_matching() {
-//         let entries = LogEntries(vec![
-//             LogEntry::new(0, 1, "command1".to_string()),
-//             LogEntry::new(1, 1, "command2".to_string()),
-//         ]);
-
-//         let is_up_to_date = entries.previous_log_entry_is_up_to_date(1, 2);
-//         assert!(!is_up_to_date);
-//     }
-
-//     #[test]
-//     fn test_previous_log_entry_is_up_to_date_test_0_empty() {
-//         let entries = LogEntries::default();
-
-//         let is_up_to_date = entries.previous_log_entry_is_up_to_date(0, 1);
-//         assert!(is_up_to_date);
-//     }
-
-//     #[test]
-//     fn test_previous_log_entry_is_up_to_date_test_0() {
-//         let entries = LogEntries(vec![LogEntry::new(0, 1, "command1".to_string())]);
-
-//         let is_up_to_date = entries.previous_log_entry_is_up_to_date(0, 1);
-//         assert!(is_up_to_date);
-//     }
-
-//     #[test]
-//     fn test_previous_log_entry_is_up_to_date_empty_entries() {
-//         let entries = LogEntries::default();
-
-//         let is_up_to_date = entries.previous_log_entry_is_up_to_date(0, 1);
-//         assert!(is_up_to_date);
-//     }
-
-//     #[test]
-//     fn test_merge_add_new() {
-//         let mut entries = LogEntries(vec![
-//             LogEntry::new(0, 1, "command1".to_string()),
-//             LogEntry::new(1, 1, "command2".to_string()),
-//         ]);
-
-//         let new_entries = vec![LogEntry::new(2, 2, "command3".to_string())];
-
-//         entries.merge(new_entries);
-
-//         assert_eq!(entries.len(), 3);
-//         assert_eq!(entries[0].index, 0);
-//         assert_eq!(entries[0].term, 1);
-//         assert_eq!(entries[0].command, "command1");
-//         assert_eq!(entries[1].index, 1);
-//         assert_eq!(entries[1].term, 1);
-//         assert_eq!(entries[1].command, "command2");
-//         assert_eq!(entries[2].index, 2);
-//         assert_eq!(entries[2].term, 2);
-//         assert_eq!(entries[2].command, "command3");
-//     }
-
-//     #[test]
-//     fn test_merge_ignore_entry() {
-//         let mut entries = LogEntries(vec![
-//             LogEntry::new(0, 1, "command1".to_string()),
-//             LogEntry::new(1, 1, "command2".to_string()),
-//         ]);
-
-//         let new_entries = vec![LogEntry::new(1, 1, "command2".to_string())];
-
-//         entries.merge(new_entries);
-
-//         assert_eq!(entries.len(), 2);
-//         assert_eq!(entries[0].index, 0);
-//         assert_eq!(entries[0].term, 1);
-//         assert_eq!(entries[0].command, "command1");
-//         assert_eq!(entries[1].index, 1);
-//         assert_eq!(entries[1].term, 1);
-//         assert_eq!(entries[1].command, "command2");
-//     }
-
-//     #[test]
-//     fn test_merge_change_incorrect_entries() {
-//         let mut entries = LogEntries(vec![
-//             LogEntry::new(0, 1, "command1".to_string()),
-//             LogEntry::new(1, 1, "command2".to_string()),
-//             LogEntry::new(2, 1, "command3".to_string()),
-//         ]);
-
-//         let new_entries = vec![
-//             LogEntry::new(0, 2, "newcommand1".to_string()),
-//             LogEntry::new(1, 2, "newcommand2".to_string()),
-//         ];
-
-//         entries.merge(new_entries);
-
-//         assert_eq!(entries.len(), 2);
-//         assert_eq!(entries[0].index, 0);
-//         assert_eq!(entries[0].term, 2);
-//         assert_eq!(entries[0].command, "newcommand1");
-//         assert_eq!(entries[1].index, 1);
-//         assert_eq!(entries[1].term, 2);
-//         assert_eq!(entries[1].command, "newcommand2");
-//     }
-
-//     #[test]
-//     fn test_handle_request_vote_term_mismatch() {
-//         let mut service = State::default();
-//         service.current_term = 2;
-
-//         let response = service.handle_request_vote(1, "127.0.0.1:4001", 0, 0);
-
-//         assert_eq!(response.vote_granted(), false);
-//         assert_eq!(response.term(), 2);
-//         assert_eq!(service.current_term, 2);
-//         assert_eq!(service.voted_for, None);
-//         assert_eq!(service.role, Role::Follower);
-//     }
-
-//     #[test]
-//     fn test_handle_request_vote_valid_vote_candidate() {
-//         let mut service = State::default();
-//         service.role = Role::Candidate;
-//         service.log_entries = LogEntries(vec![LogEntry::new(0, 1, "command1".to_string())]);
-
-//         let response = service.handle_request_vote(2, "127.0.0.1:4001", 0, 2);
-
-//         assert_eq!(response.vote_granted(), true);
-//         assert_eq!(response.term(), 2);
-//         assert_eq!(service.current_term, 2);
-//         assert_eq!(
-//             service.voted_for,
-//             Some(SocketAddr::from_str("127.0.0.1:4001").unwrap())
-//         );
-//         assert_eq!(service.role, Role::Follower);
-//         assert_eq!(service.leader, None);
-//     }
-
-//     #[test]
-//     fn test_handle_request_vote_valid_vote() {
-//         let mut service = State::default();
-//         service.log_entries = LogEntries(vec![LogEntry::new(0, 1, "command1".to_string())]);
-
-//         let response = service.handle_request_vote(2, "127.0.0.1:4001", 1, 1);
-
-//         assert_eq!(response.vote_granted(), true);
-//         assert_eq!(response.term(), 2);
-//         assert_eq!(service.current_term, 2);
-//         assert_eq!(
-//             service.voted_for,
-//             Some(SocketAddr::from_str("127.0.0.1:4001").unwrap())
-//         );
-//         assert_eq!(service.role, Role::Follower);
-//         assert_eq!(service.leader, None);
-//     }
-
-//     #[test]
-//     fn test_handle_request_vote_already_voted() {
-//         let mut service = State::default();
-//         service.current_term = 2;
-//         service.voted_for = Some(SocketAddr::from_str("127.0.0.1:4001").unwrap());
-//         service.log_entries = LogEntries(vec![LogEntry::new(0, 1, "command1".to_string())]);
-
-//         let response = service.handle_request_vote(2, "127.0.0.1:4002", 0, 1);
-
-//         assert_eq!(response.vote_granted(), false);
-//         assert_eq!(response.term(), 2);
-//         assert_eq!(service.current_term, 2);
-//         assert_eq!(
-//             service.voted_for,
-//             Some(SocketAddr::from_str("127.0.0.1:4001").unwrap())
-//         );
-//         assert_eq!(service.role, Role::Follower);
-//     }
-
-//     #[test]
-//     fn test_handle_request_vote_logs_not_up_to_date() {
-//         let mut service = State::default();
-//         service.log_entries = LogEntries(vec![
-//             LogEntry::new(0, 1, "command1".to_string()),
-//             LogEntry::new(1, 2, "command1".to_string()),
-//         ]);
-
-//         let response = service.handle_request_vote(2, "127.0.0.1:4001", 1, 1);
-
-//         assert_eq!(response.vote_granted(), false);
-//         assert_eq!(response.term(), 2);
-//         assert_eq!(service.current_term, 2);
-//         assert_eq!(service.voted_for, None);
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        state::{NodeId, Role},
+        storage::LogEntries,
+    };
+
+    // Mock implementation for testing
+    #[derive(Debug)]
+    struct MockState {
+        id: NodeId,
+        current_term: u64,
+        commit_index: u64,
+        log_entries: LogEntries,
+        voted_for: Option<NodeId>,
+        leader: Option<SocketAddr>,
+        role: Role,
+        cluster_size: u64,
+    }
+
+    impl Consensus for MockState {
+        async fn commit_hard_state(&self) {}
+
+        fn current_term(&self) -> u64 {
+            self.current_term
+        }
+
+        fn commit_index(&self) -> u64 {
+            self.commit_index
+        }
+
+        fn update_commit_index(&mut self, commit_index: u64) {
+            self.commit_index = commit_index;
+        }
+
+        fn cluster_size(&self) -> u64 {
+            self.cluster_size
+        }
+
+        fn last_log_info(&self) -> LogsInformation {
+            LogsInformation::default()
+        }
+
+        fn leader(&self) -> Option<SocketAddr> {
+            self.leader
+        }
+
+        fn log_entries(&mut self) -> &mut LogEntries {
+            &mut self.log_entries
+        }
+
+        fn vote_for(&mut self, node: NodeId) {
+            self.voted_for = Some(node);
+        }
+
+        fn voted_for(&self) -> Option<&NodeId> {
+            self.voted_for.as_ref()
+        }
+
+        fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
+            self.role = Role::Follower;
+            self.leader = leader_id;
+            self.current_term = new_term;
+            self.voted_for = None;
+        }
+
+        fn become_candidate(&mut self) {
+            self.role = Role::Candidate;
+        }
+
+        fn become_leader(&mut self) {
+            self.role = Role::Leader;
+        }
+
+        fn id(&self) -> &NodeId {
+            &self.id
+        }
+
+        fn role(&self) -> &Role {
+            &self.role
+        }
+    }
+
+    impl MockState {
+        fn default() -> Self {
+            let addr = SocketAddr::from_str("127.0.0.1:4000").unwrap();
+            Self {
+                id: NodeId::new(addr),
+                current_term: 0,
+                commit_index: 0,
+                log_entries: LogEntries::default(),
+                voted_for: None,
+                leader: None,
+                role: Role::Follower,
+                cluster_size: 3,
+            }
+        }
+    }
+
+    #[test]
+    fn test_is_majority_single_node() {
+        let mut state = MockState::default();
+        state.cluster_size = 1;
+        assert!(state.is_majority(1));
+        assert!(state.is_majority(0)); // Special case for single node
+    }
+
+    #[test]
+    fn test_is_majority_three_nodes() {
+        let mut state = MockState::default();
+        state.cluster_size = 3;
+        assert!(!state.is_majority(0));
+        assert!(!state.is_majority(1));
+        assert!(state.is_majority(2));
+        assert!(state.is_majority(3));
+    }
+
+    #[test]
+    fn test_is_majority_five_nodes() {
+        let mut state = MockState::default();
+        state.cluster_size = 5;
+        assert!(!state.is_majority(0));
+        assert!(!state.is_majority(1));
+        assert!(!state.is_majority(2));
+        assert!(state.is_majority(3));
+        assert!(state.is_majority(4));
+        assert!(state.is_majority(5));
+    }
+
+    #[test]
+    fn test_is_majority_even_nodes() {
+        let mut state = MockState::default();
+        state.cluster_size = 4;
+        assert!(!state.is_majority(0));
+        assert!(!state.is_majority(1));
+        assert!(!state.is_majority(2));
+        assert!(state.is_majority(3));
+        assert!(state.is_majority(4));
+    }
+
+    #[test]
+    fn test_count_votes_becomes_leader_with_majority() {
+        let mut state = MockState::default();
+        state.cluster_size = 3;
+        state.count_votes(2);
+        assert_eq!(state.role(), &Role::Leader);
+    }
+
+    #[test]
+    fn test_count_votes_stays_candidate_without_majority() {
+        let mut state = MockState::default();
+        state.cluster_size = 5;
+        state.role = Role::Candidate;
+        state.count_votes(2);
+        assert_eq!(state.role(), &Role::Candidate);
+    }
+
+    #[test]
+    fn test_count_votes_single_node_becomes_leader() {
+        let mut state = MockState::default();
+        state.cluster_size = 1;
+        state.count_votes(1);
+        assert_eq!(state.role(), &Role::Leader);
+    }
+
+    #[test]
+    fn test_handle_request_vote_grants_vote_when_valid() {
+        let mut state = MockState::default();
+        state.current_term = 1;
+
+        let candidate_addr = "127.0.0.1:4001";
+        let response = state.handle_request_vote(1, candidate_addr, 1, 1);
+
+        assert!(response.vote_granted());
+        assert_eq!(response.term(), 1);
+        assert_eq!(
+            state.voted_for().unwrap().addr().to_string(),
+            candidate_addr
+        );
+    }
+
+    #[test]
+    fn test_handle_request_vote_rejects_lower_term() {
+        let mut state = MockState::default();
+        state.current_term = 2;
+
+        let candidate_addr = "127.0.0.1:4001";
+        let response = state.handle_request_vote(1, candidate_addr, 1, 1);
+
+        assert!(!response.vote_granted());
+        assert_eq!(response.term(), 2);
+        assert!(state.voted_for().is_none());
+    }
+
+    #[test]
+    fn test_handle_request_vote_rejects_already_voted() {
+        let mut state = MockState::default();
+        state.current_term = 1;
+        state.voted_for = Some(NodeId::new(SocketAddr::from_str("127.0.0.1:4002").unwrap()));
+
+        let candidate_addr = "127.0.0.1:4001";
+        let response = state.handle_request_vote(1, candidate_addr, 1, 1);
+
+        assert!(!response.vote_granted());
+        assert_eq!(response.term(), 1);
+    }
+
+    #[test]
+    fn test_handle_request_vote_allows_revote_for_same_candidate() {
+        let mut state = MockState::default();
+        state.current_term = 1;
+        state.voted_for = Some(NodeId::new(SocketAddr::from_str("127.0.0.1:4001").unwrap()));
+
+        let candidate_addr = "127.0.0.1:4001";
+        let response = state.handle_request_vote(1, candidate_addr, 1, 1);
+
+        assert!(response.vote_granted());
+        assert_eq!(response.term(), 1);
+    }
+
+    #[test]
+    fn test_handle_request_vote_updates_term_when_higher() {
+        let mut state = MockState::default();
+        state.current_term = 1;
+        state.role = Role::Candidate;
+
+        let candidate_addr = "127.0.0.1:4001";
+        let response = state.handle_request_vote(3, candidate_addr, 1, 1);
+
+        assert_eq!(state.current_term(), 3);
+        assert_eq!(state.role(), &Role::Follower);
+        assert!(state.voted_for().is_some());
+        assert!(response.vote_granted());
+    }
+
+    // New tests for handle_append_entries
+    #[test]
+    fn test_handle_append_entries_rejects_lower_term() {
+        let mut state = MockState::default();
+        state.current_term = 2;
+
+        let result = state.handle_append_entries(1, "127.0.0.1:4001", 0, 0, 0, vec![]);
+
+        match result {
+            AppendEntriesResult::TermMismatch(term) => assert_eq!(term, 2),
+            _ => panic!("Expected TermMismatch"),
+        }
+    }
+
+    #[test]
+    fn test_handle_append_entries_becomes_follower() {
+        let mut state = MockState::default();
+        state.current_term = 1;
+        state.role = Role::Candidate;
+
+        let _result = state.handle_append_entries(2, "127.0.0.1:4001", 0, 0, 0, vec![]);
+
+        assert_eq!(state.role(), &Role::Follower);
+        assert_eq!(state.current_term(), 2);
+        assert_eq!(state.leader().unwrap().to_string(), "127.0.0.1:4001");
+    }
+
+    #[test]
+    fn test_handle_append_entries_updates_commit_index() {
+        let mut state = MockState::default();
+        state.current_term = 1;
+        state.commit_index = 0;
+
+        let _result = state.handle_append_entries(
+            1,
+            "127.0.0.1:4001",
+            0,
+            0,
+            5, // leader_commit
+            vec![],
+        );
+
+        // Since LogsInformation::default() likely returns last_log_index = 0,
+        // commit_index should be min(5, 0) = 0, but the function will only update if leader_commit > current
+        assert_eq!(state.commit_index(), 0);
+    }
+
+    #[test]
+    fn test_handle_append_entries_success_case() {
+        let mut state = MockState::default();
+        state.current_term = 1;
+
+        let result = state.handle_append_entries(1, "127.0.0.1:4001", 0, 0, 0, vec![]);
+
+        match result {
+            AppendEntriesResult::Ok => {}
+            _ => panic!("Expected Ok result"),
+        }
+
+        // Verify state changes
+        assert_eq!(state.role(), &Role::Follower);
+        assert_eq!(state.leader().unwrap().to_string(), "127.0.0.1:4001");
+    }
+
+    #[test]
+    fn test_handle_append_entries_same_term_updates_leader() {
+        let mut state = MockState::default();
+        state.current_term = 1;
+        state.role = Role::Candidate;
+        state.leader = None;
+
+        let _result = state.handle_append_entries(1, "127.0.0.1:4001", 0, 0, 0, vec![]);
+
+        assert_eq!(state.role(), &Role::Follower);
+        assert_eq!(state.current_term(), 1);
+        assert_eq!(state.leader().unwrap().to_string(), "127.0.0.1:4001");
+    }
+}

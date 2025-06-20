@@ -4,6 +4,7 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
     time::{interval, sleep, Instant},
 };
+use uuid::Uuid;
 
 use crate::{
     client::{append_entries, vote},
@@ -87,7 +88,7 @@ impl<S: Consensus + PeersManagement> Node<S> {
                         };
                         let sender = req.sender;
                         let entry = Entry {
-                            id: "hey".to_string(),
+                            id: Uuid::now_v7().to_string(), //TODO: use new_v7 and pass the timestamp
                             data,
                         };
                         if sender.send(entry).is_err() {
