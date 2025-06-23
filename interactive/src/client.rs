@@ -48,6 +48,10 @@ pub async fn handle_request(msg: CrudMessage) {
             cluster_req.get().set_data(value);
             let resp = cluster_req.send().pipeline.get_item();
             let resp = resp.read_request().send().promise.await.unwrap();
+            let raw_result = resp.get().unwrap().get_data().unwrap();
+            let result = raw_result.get_data().unwrap();
+            println!("response: {:?}", String::from_utf8_lossy(result));
+            println!("response: {:?}", raw_result);
         }
         CrudOperation::Read | CrudOperation::Update | CrudOperation::Delete => {
             let mut cluster_req = leader_client.get_request();
@@ -56,6 +60,10 @@ pub async fn handle_request(msg: CrudMessage) {
                     cluster_req.get().set_id(req.id.unwrap());
                     let resp = cluster_req.send().pipeline.get_item();
                     let resp = resp.read_request().send().promise.await.unwrap();
+                    let raw_result = resp.get().unwrap().get_data().unwrap();
+                    let result = raw_result.get_data().unwrap();
+                    println!("response: {:?}", String::from_utf8_lossy(result));
+                    println!("response: {:?}", raw_result);
                 }
                 CrudOperation::Update => {
                     cluster_req.get().set_id(req.id.unwrap());
@@ -65,11 +73,19 @@ pub async fn handle_request(msg: CrudMessage) {
                     let mut update_request = resp.update_request();
                     update_request.get().set_data(value);
                     let resp = update_request.send().promise.await.unwrap();
+                    let resp = resp.get().unwrap().get_item().unwrap();
+                    let resp = resp.read_request().send().promise.await.unwrap();
+                    let raw_result = resp.get().unwrap().get_data().unwrap();
+                    let result = raw_result.get_data().unwrap();
+                    println!("response: {:?}", String::from_utf8_lossy(result));
+                    println!("response: {:?}", raw_result);
                 }
                 CrudOperation::Delete => {
                     cluster_req.get().set_id(req.id.unwrap());
                     let resp = cluster_req.send().pipeline.get_item();
                     let resp = resp.delete_request().send().promise.await.unwrap();
+                    let result = resp.get().unwrap().get_status();
+                    println!("response to delete: {:?}", result);
                 }
                 _ => unreachable!(),
             }

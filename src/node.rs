@@ -57,8 +57,20 @@ impl<S: Consensus + PeersManagement> Node<S> {
                     tracing::error!("Failed to send response in channel for get leader");
                 }
             }
-            CommandMsg::Read(_req) => {
-                // Handle read command
+            CommandMsg::Read(req) => {
+                let table_name = self.state.id().addr().to_string();
+                let msg = req.msg;
+                let id = msg.id().to_string();
+                let Ok(data) = self.state.log_entries().read(&id, &table_name).await else {
+                    return;
+                };
+                let Some(data) = data else { return };
+                let entry = Entry { id, data };
+                let sender = req.sender;
+
+                if sender.send(entry).is_err() {
+                    tracing::error!("Failed to send response in channel for create");
+                }
             }
             CommandMsg::Modify(req) => {
                 //TODO: when new operation:
@@ -66,7 +78,7 @@ impl<S: Consensus + PeersManagement> Node<S> {
                 // 2 persist to disk
                 // 3 broadcast to all peers
                 // 4 when majority of peers have the log, apply to state machine
-                let id = self.state.id().addr().to_string();
+                let id_for_file = self.state.id().addr().to_string();
                 let current_term = self.state.current_term();
                 let log_entries = self.state.log_entries();
 
@@ -75,27 +87,59 @@ impl<S: Consensus + PeersManagement> Node<S> {
                         //TODO: it would be cool to be able to serialize the whole command? how to
                         //keep track of the commands in a better and easier way without copying all
                         //the data so much?
+                        //TODO: I need a better data structure for the log entry
                         log_entries.new_entry(current_term, data.clone());
 
+                        let last_entries = log_entries.last_entries::<3>();
+
                         //TODO: before commiting we need to ensure that everybody received a copy of it
-                        //TODO: use self.send_entries(&log_entries).await;
-                        self.state.commit_hard_state().await;
+                        if let Ok(acknowledgments) = self.send_entries(&last_entries).await {
+                            if self.state.is_majority(acknowledgments) {
+                                self.state.commit_hard_state().await;
+                            }
+                        };
 
                         let log_entries = self.state.log_entries();
-                        if let Err(err) = log_entries.create(data.clone(), id.as_str()).await {
-                            tracing::error!("Failed to create log entry {}", err);
+                        // NOTE: this is the step where it's appended to the state machine (aka database or whatever)
+                        let id = match log_entries.create(data.clone(), id_for_file.as_str()).await
+                        {
+                            Ok(id) => id,
+                            Err(err) => {
+                                tracing::error!(err = ?err,"Failed to create log entry");
+                                return;
+                            }
                         };
+
                         let sender = req.sender;
-                        let entry = Entry {
-                            id: Uuid::now_v7().to_string(), //TODO: use new_v7 and pass the timestamp
-                            data,
-                        };
+                        let entry = Entry { id, data };
                         if sender.send(entry).is_err() {
                             tracing::error!("Failed to send response in channel for create");
                         }
                     }
-                    Operation::Update(_id, _data) => {
-                        // Handle update command
+                    Operation::Update(id, data) => {
+                        log_entries.new_entry(current_term, data.clone());
+
+                        let last_entries = log_entries.last_entries::<3>();
+
+                        //TODO: before commiting we need to ensure that everybody received a copy of it
+                        if let Ok(acknowledgments) = self.send_entries(&last_entries).await {
+                            if self.state.is_majority(acknowledgments) {
+                                self.state.commit_hard_state().await;
+                            }
+                        };
+
+                        let log_entries = self.state.log_entries();
+                        if let Err(err) = log_entries
+                            .update(data.clone(), id_for_file.as_str(), &id)
+                            .await
+                        {
+                            tracing::error!("Failed to update log entry {}", err);
+                        };
+                        let sender = req.sender;
+                        let entry = Entry { id, data };
+                        if sender.send(entry).is_err() {
+                            tracing::error!("Failed to send response in channel for update");
+                        }
                     }
                     Operation::Delete(_id) => {
                         // Handle delete command

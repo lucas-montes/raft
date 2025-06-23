@@ -130,7 +130,7 @@
         }
 
         .crud-button-read {
-            background: linear-gradient(135deg, #007bff 0%, #6f42c1 100%) !important;
+            background: linear-gradient(135deg, #e743f6 0%, #6f42c1 100%) !important;
         }
 
         .crud-button-update {
@@ -139,6 +139,37 @@
 
         .crud-button-delete {
             background: linear-gradient(135deg, #dc3545 0%, #c82333 100%) !important;
+        }
+
+        .server-log-entry.create {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+
+        .server-log-entry.read {
+            border-left-color: #e743f6;
+            background: #d1ecf1;
+        }
+
+        .server-log-entry.update {
+            border-left-color: #ffc107;
+            background: #fff3cd;
+        }
+
+        .server-log-entry.delete {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+        }
+
+        /* Add pulsing effect for active CRUD operations */
+        .crud-active {
+            animation: crud-pulse 2s infinite;
+        }
+
+        @keyframes crud-pulse {
+            0% { box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+            50% { box-shadow: 0 4px 25px rgba(0,123,255,0.4); }
+            100% { box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
         }
 
         .response-container {

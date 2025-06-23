@@ -25,7 +25,7 @@ impl command::item::Server for Item {
         Promise::from_future(async move {
             let (msg, rx) = CommandMsg::delete(id);
             if let Err(err) = commands_channel.send(msg).await {
-                tracing::error!("error sending the delete command {err}");
+                tracing::error!(err = ?err, "error sending the delete command");
                 return Err(capnp::Error::failed(
                     "error sending the delete command".into(),
                 ));
@@ -33,7 +33,7 @@ impl command::item::Server for Item {
             match rx.await {
                 Ok(_) => Ok(()),
                 Err(err) => {
-                    tracing::error!("error receiving the delete command {err}");
+                    tracing::error!(err = ?err, "error receiving the delete command");
                     Err(capnp::Error::failed(
                         "error receiving the delete command".into(),
                     ))
@@ -65,7 +65,7 @@ impl command::item::Server for Item {
         Promise::from_future(async move {
             let (msg, rx) = CommandMsg::update(id, data);
             if let Err(err) = commands_channel.send(msg).await {
-                tracing::error!("error sending the create command {err}");
+                tracing::error!(err = ?err, "error sending the create command");
                 return Err(capnp::Error::failed(
                     "error sending the create command".into(),
                 ));
@@ -79,7 +79,7 @@ impl command::item::Server for Item {
                     }));
                 }
                 Err(err) => {
-                    tracing::error!("error receiving the update command {err}");
+                    tracing::error!(err = ?err, "error receiving the update command");
                     return Err(capnp::Error::failed(
                         "error receiving the update command".into(),
                     ));
@@ -134,7 +134,7 @@ impl command::Server for Server {
         Promise::from_future(async move {
             let (msg, rx) = CommandMsg::create(data);
             if let Err(err) = commands_channel.send(msg).await {
-                tracing::error!("error sending the create command {err}");
+                tracing::error!(err = ?err, "error sending the create command");
                 return Err(capnp::Error::failed(
                     "error sending the create command".into(),
                 ));
@@ -148,7 +148,7 @@ impl command::Server for Server {
                     }));
                 }
                 Err(err) => {
-                    tracing::error!("error receiving the create command {err}");
+                    tracing::error!(err = ?err, "error receiving the create command");
                     return Err(capnp::Error::failed(
                         "error receiving the create command".into(),
                     ));

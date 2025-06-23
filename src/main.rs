@@ -41,13 +41,13 @@ pub struct Cli {
     /// Path where the hard state will be saved
     #[arg(short, long, default_value = "data/state")]
     state_path: PathBuf,
-    #[arg(long, default_value_t = 1.0)]
-    min_heartbeat: f64,
-    #[arg(long, default_value_t = 2.9)]
-    max_heartbeat: f64,
     #[arg(long, default_value_t = 3.0)]
-    min_election_timeout: f64,
+    min_heartbeat: f64,
+    #[arg(long, default_value_t = 5.9)]
+    max_heartbeat: f64,
     #[arg(long, default_value_t = 6.0)]
+    min_election_timeout: f64,
+    #[arg(long, default_value_t = 8.0)]
     max_election_timeout: f64,
     /// Size of the channels used for communication between the server and the state
     #[arg(long, default_value_t = 100)]
@@ -222,12 +222,12 @@ async fn join_cluster(
                         return;
                     }
                     Err(err) => {
-                        tracing::error!(err = ?err, "Failed to join cluster");
+                        tracing::error!(err = ?err, "Failed to join cluster: {:?}", &cluster_addr);
                         continue;
                     }
                 },
                 Err(err) => {
-                    tracing::error!(err = ?err, "Failed to join cluster");
+                    tracing::error!(err = ?err, "Failed to join cluster: {:?}", &cluster_addr);
                     continue;
                 }
             };
@@ -237,6 +237,6 @@ async fn join_cluster(
             tracing::error!("Failed to join cluster after {} attempts", count);
             panic!("Failed to join cluster after multiple attempts");
         }
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(count)).await;
     }
 }

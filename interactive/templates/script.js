@@ -30,7 +30,8 @@
  * @property {number} endY - Ending Y coordinate
  * @property {number} currentX - Current X coordinate
  * @property {number} currentY - Current Y coordinate
- * @property {'vote'|'append'|'heartbeat'} type - Type of message
+ * @property {'vote'|'append'|'heartbeat'|'crud'} type - Type of message
+ * @property {string} [crudOperation] - CRUD operation type (Create, Read, Update, Delete)
  * @property {number} progress - Animation progress (0-1)
  * @property {number} duration - Animation duration in milliseconds
  * @property {number} startTime - Animation start time
@@ -164,12 +165,16 @@ function handleServerLog(logData) {
         case 'sendVotes':
             animateMessage(span.addr, null, 'vote');
             break;
+        case 'create':
+        case 'read':
+        case 'update':
+        case 'delete':
+            animateMessage(span.addr, null, 'crud', action.charAt(0).toUpperCase() + action.slice(1));
+            break;
         case 'receiveAppendEntries':
         case 'receiveVote':
         case 'startTransaction':
         case 'votingFor':
-        case 'create':
-            // These actions don't change node state but are logged
             console.log(`${span.addr} performed: ${action}`);
             break;
     }
@@ -224,9 +229,10 @@ function initializeNodeFromLog(addr) {
  * Animate message between nodes
  * @param {string} fromAddr - Source node address
  * @param {string|null} toAddr - Target node address (null for broadcast)
- * @param {'vote'|'append'|'heartbeat'} messageType - Type of message to animate
+ * @param {'vote'|'append'|'heartbeat'|'crud'} messageType - Type of message to animate
+ * @param {string} [crudOperation] - CRUD operation type for crud messages
  */
-function animateMessage(fromAddr, toAddr, messageType) {
+function animateMessage(fromAddr, toAddr, messageType, crudOperation) {
     const fromNode = nodes[fromAddr];
     if (!fromNode) return;
 
@@ -234,13 +240,13 @@ function animateMessage(fromAddr, toAddr, messageType) {
     if (!toAddr) {
         Object.keys(nodes).forEach(addr => {
             if (addr !== fromAddr) {
-                createMessageAnimation(fromNode, nodes[addr], messageType);
+                createMessageAnimation(fromNode, nodes[addr], messageType, crudOperation);
             }
         });
     } else {
         const toNode = nodes[toAddr];
         if (toNode) {
-            createMessageAnimation(fromNode, toNode, messageType);
+            createMessageAnimation(fromNode, toNode, messageType, crudOperation);
         }
     }
 }
@@ -249,9 +255,10 @@ function animateMessage(fromAddr, toAddr, messageType) {
  * Create a single message animation
  * @param {Node} fromNode - Source node
  * @param {Node} toNode - Target node
- * @param {'vote'|'append'|'heartbeat'} messageType - Type of message
+ * @param {'vote'|'append'|'heartbeat'|'crud'} messageType - Type of message
+ * @param {string} [crudOperation] - CRUD operation type for crud messages
  */
-function createMessageAnimation(fromNode, toNode, messageType) {
+function createMessageAnimation(fromNode, toNode, messageType, crudOperation) {
     /** @type {MessageAnimation} */
     const message = {
         startX: fromNode.x + 40,
@@ -261,6 +268,7 @@ function createMessageAnimation(fromNode, toNode, messageType) {
         currentX: fromNode.x + 40,
         currentY: fromNode.y + 40,
         type: messageType,
+        crudOperation: crudOperation, // Add this property
         progress: 0,
         duration: 1000, // 1 second
         startTime: Date.now()
@@ -290,9 +298,23 @@ function startAnimationLoop() {
 
                 // Draw message ball
                 ctx.beginPath();
-                ctx.arc(message.currentX, message.currentY, 6, 0, 2 * Math.PI);
+
+                // Different sizes for different message types
+                const radius = message.type === 'crud' ? 8 : 6;
+                ctx.arc(message.currentX, message.currentY, radius, 0, 2 * Math.PI);
 
                 switch (message.type) {
+                    case 'crud':
+                        // Different colors for different CRUD operations
+                        const colors = getCrudColors(message.crudOperation);
+                        ctx.fillStyle = colors.fill;
+                        ctx.shadowColor = colors.shadow;
+
+                        // Add operation label
+                        if (message.crudOperation) {
+                            drawCrudLabel(ctx, message, colors.text);
+                        }
+                        break;
                     case 'vote':
                         ctx.fillStyle = '#ffc107';
                         ctx.shadowColor = '#ffc107';
@@ -321,6 +343,58 @@ function startAnimationLoop() {
         requestAnimationFrame(animate);
     }
     animate();
+}
+
+/**
+ * Get colors for CRUD operations
+ * @param {string} operation - CRUD operation
+ * @returns {{fill: string, shadow: string, text: string}}
+ */
+function getCrudColors(operation) {
+    if (!operation) {
+        return { fill: '#6c757d', shadow: '#6c757d', text: '?' };
+    }
+    if (operation.includes('_response')) {
+        // Response animations - lighter colors
+        const baseOp = operation.replace('_response', '');
+        const baseColors = getCrudColors(baseOp);
+        return {
+            fill: baseColors.fill + '80', // Add transparency
+            shadow: baseColors.shadow,
+            text: baseColors.text
+        };
+    }
+
+    switch (operation) {
+        case 'Create':
+            return { fill: '#28a745', shadow: '#28a745', text: 'C' };
+        case 'Read':
+            return { fill: '#e743f6', shadow: '#e743f6', text: 'R' };
+        case 'Update':
+            return { fill: '#ffc107', shadow: '#ffc107', text: 'U' };
+        case 'Delete':
+            return { fill: '#dc3545', shadow: '#dc3545', text: 'D' };
+        default:
+            return { fill: '#6c757d', shadow: '#6c757d', text: '?' };
+    }
+}
+
+
+/**
+ * Draw CRUD operation label on the animation
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {MessageAnimation} message - Message animation object
+ * @param {string} label - Label to draw
+ */
+function drawCrudLabel(ctx, message, label) {
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 10px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, message.currentX, message.currentY);
+    ctx.restore();
 }
 
 /**
@@ -577,6 +651,9 @@ async function sendCrudRequest(operation, payload) {
     try {
         showCrudResponse('Sending request...', true);
 
+        // Show visual animation from UI to cluster
+        animateCrudRequest(operation);
+
         // Send CRUD request through WebSocket
         const message = {
             action: 'crudOperation',
@@ -586,31 +663,124 @@ async function sendCrudRequest(operation, payload) {
 
         ws.send(JSON.stringify(message));
 
-        // Note: In a real implementation, you'd want to handle the response
-        // For now, we'll just show a success message
-        setTimeout(() => {
-            showCrudResponse(`${operation.toUpperCase()} operation sent successfully`, true);
-        }, 500);
+        setupCrudResponseHandler(operation);
 
     } catch (error) {
         showCrudResponse(`Error: ${error.message}`, false);
     }
 }
 
-function showCrudResponse(message, isSuccess) {
+function showCrudResponse(message, isSuccess, operationDetails = null) {
     const responseContainer = document.getElementById('crud-response');
     const responseContent = document.getElementById('crud-response-content');
 
     if (responseContainer && responseContent) {
         responseContainer.style.display = 'block';
         responseContainer.className = `response-container ${isSuccess ? 'response-success' : 'response-error'}`;
-        responseContent.textContent = message;
 
-        // Auto-hide after 5 seconds
+        let displayMessage = message;
+        if (operationDetails) {
+            displayMessage += `\n\nOperation: ${operationDetails.operation}`;
+            if (operationDetails.id) displayMessage += `\nID: ${operationDetails.id}`;
+            if (operationDetails.data) displayMessage += `\nData: ${operationDetails.data}`;
+        }
+
+        responseContent.textContent = displayMessage;
+
         setTimeout(() => {
-            if (!isSuccess || message.includes('sent successfully')) {
-                responseContainer.style.display = 'none';
-            }
-        }, 5000);
+            responseContainer.style.display = 'none';
+            // if (!isSuccess || message.includes('sent successfully')) {
+            //     responseContainer.style.display = 'none';
+            // }
+        }, 3000);
+    }
+}
+
+/**
+ * Animate CRUD request from UI to cluster
+ * @param {'Create'|'Read'|'Update'|'Delete'} operation - CRUD operation type
+ */
+function animateCrudRequest(operation) {
+    const leader = Object.entries(nodes).find(([id, node]) => node.role === 'leader');
+
+    if (leader) {
+        const [leaderId, leaderNode] = leader;
+
+        // Create animation from CRUD panel to leader
+        const crudPanel = document.getElementById('crud-operations');
+        const panelRect = crudPanel.getBoundingClientRect();
+        const nodesContainer = document.getElementById('nodes');
+        const nodesRect = nodesContainer.getBoundingClientRect();
+
+        // Calculate relative positions
+        const startX = panelRect.left - nodesRect.left + panelRect.width / 2;
+        const startY = panelRect.top - nodesRect.top + panelRect.height / 2;
+
+        /** @type {MessageAnimation} */
+        const message = {
+            startX: startX,
+            startY: startY,
+            endX: leaderNode.x + 40,
+            endY: leaderNode.y + 40,
+            currentX: startX,
+            currentY: startY,
+            type: 'crud',
+            crudOperation: operation,
+            progress: 0,
+            duration: 1500, // Slightly longer for CRUD
+            startTime: Date.now()
+        };
+
+        messageAnimations.push(message);
+    }
+}
+
+/**
+ * Set up handler for CRUD response
+ * @param {'Create'|'Read'|'Update'|'Delete'} operation - CRUD operation type
+ */
+function setupCrudResponseHandler(operation) {
+    // This would be enhanced to handle actual responses from the backend
+    setTimeout(() => {
+        showCrudResponse(`${operation} operation completed successfully`, true);
+        animateCrudResponse(operation);
+    }, 2000); // Simulate processing time
+}
+
+
+/**
+ * Animate CRUD response from leader back to UI
+ * @param {'Create'|'Read'|'Update'|'Delete'} operation - CRUD operation type
+ */
+function animateCrudResponse(operation) {
+    const leader = Object.entries(nodes).find(([id, node]) => node.role === 'leader');
+
+    if (leader) {
+        const [leaderId, leaderNode] = leader;
+
+        const crudPanel = document.getElementById('crud-operations');
+        const panelRect = crudPanel.getBoundingClientRect();
+        const nodesContainer = document.getElementById('nodes');
+        const nodesRect = nodesContainer.getBoundingClientRect();
+
+        const endX = panelRect.left - nodesRect.left + panelRect.width / 2;
+        const endY = panelRect.top - nodesRect.top + panelRect.height / 2;
+
+        /** @type {MessageAnimation} */
+        const message = {
+            startX: leaderNode.x + 40,
+            startY: leaderNode.y + 40,
+            endX: endX,
+            endY: endY,
+            currentX: leaderNode.x + 40,
+            currentY: leaderNode.y + 40,
+            type: 'crud',
+            crudOperation: operation + '_response',
+            progress: 0,
+            duration: 1500,
+            startTime: Date.now()
+        };
+
+        messageAnimations.push(message);
     }
 }

@@ -112,6 +112,15 @@ pub struct Query {
     id: String,
     filter: Option<String>,
 }
+impl Query {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+    pub fn filter(&self) -> Option<&str> {
+        self.filter.as_deref()
+    }
+}
+
 #[derive(Debug)]
 pub enum Operation {
     Create(Vec<u8>),
