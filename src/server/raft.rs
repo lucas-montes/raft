@@ -1,170 +1,18 @@
 use std::{net::SocketAddr, str::FromStr};
 
 use capnp::capability::Promise;
-use capnp_rpc::{pry, rpc_twoparty_capnp, twoparty, RpcSystem};
-use futures::AsyncReadExt;
-use tokio::sync::mpsc::Sender;
+use capnp_rpc::pry;
 
 use crate::{
-    client::{create_client, create_client_com},
+    client::create_client,
     consensus::AppendEntriesResult,
     dto::{CommandMsg, RaftMsg},
-    peers::{NewPeer, Peer},
-    raft_capnp::{command, raft},
+    peers::{PeerDisconnected, PeersDisconnected},
+    raft_capnp::raft,
     storage::LogEntry,
 };
 
-#[derive(Debug, Clone)]
-pub struct Server {
-    raft_channel: Sender<RaftMsg>,
-    commands_channel: Sender<CommandMsg>,
-    peers_channel: Sender<NewPeer>,
-}
-
-impl Server {
-    pub fn new(
-        raft_channel: Sender<RaftMsg>,
-        commands_channel: Sender<CommandMsg>,
-        peers_channel: Sender<NewPeer>,
-    ) -> Self {
-        Self {
-            raft_channel,
-            commands_channel,
-            peers_channel,
-        }
-    }
-
-    pub async fn run(self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
-        let listener = tokio::net::TcpListener::bind(&addr).await?;
-        let client: raft::Client = capnp_rpc::new_client(self);
-        loop {
-            let (stream, _) = listener.accept().await?;
-            stream.set_nodelay(true)?;
-            let (reader, writer) =
-                tokio_util::compat::TokioAsyncReadCompatExt::compat(stream).split();
-            let network = twoparty::VatNetwork::new(
-                futures::io::BufReader::new(reader),
-                futures::io::BufWriter::new(writer),
-                rpc_twoparty_capnp::Side::Server,
-                Default::default(),
-            );
-
-            let rpc_system = RpcSystem::new(Box::new(network), Some(client.clone().client));
-
-            tokio::task::spawn_local(rpc_system);
-        }
-    }
-}
-
-struct Item {
-    id: String,
-    data: Vec<u8>, //TODO: make it a pointer or something
-    commands_channel: Sender<CommandMsg>,
-}
-
-impl command::item::Server for Item {
-    fn read(
-        &mut self,
-        _: command::item::ReadParams,
-        mut results: command::item::ReadResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        let mut data = results.get().init_data();
-        data.set_data(&self.data);
-        data.set_id(&self.id);
-        Promise::ok(())
-    }
-
-    fn update(
-        &mut self,
-        params: command::item::UpdateParams,
-        mut results: command::item::UpdateResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        let data = pry!(pry!(params.get()).get_data()).to_vec();
-        let commands_channel = self.commands_channel.clone();
-        let id = self.id.clone();
-        Promise::from_future(async move {
-            let (msg, rx) = CommandMsg::update(id, data);
-            if let Err(err) = commands_channel.send(msg).await {
-                tracing::error!("error sending the create command {err}");
-                return Err(capnp::Error::failed(
-                    "error sending the create command".into(),
-                ));
-            };
-            match rx.await {
-                Ok(entry) => {
-                    results.get().set_item(capnp_rpc::new_client(Item {
-                        id: entry.id,
-                        data: entry.data,
-                        commands_channel,
-                    }));
-                }
-                Err(err) => {
-                    tracing::error!("error receiving the update command {err}");
-                    return Err(capnp::Error::failed(
-                        "error receiving the update command".into(),
-                    ));
-                }
-            };
-
-            Ok(())
-        })
-    }
-}
-
-impl command::Server for Server {
-    fn start_transaction(
-        &mut self,
-        _: command::StartTransactionParams,
-        mut results: command::StartTransactionResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        let channel = self.commands_channel.clone();
-        tracing::info!(action = "startTransaction");
-        Promise::from_future(async move {
-            let (msg, rx) = CommandMsg::get_leader();
-            channel.send(msg).await.expect("msg not sent");
-            if let Some(leader) = rx.await.expect("msg not received") {
-                let client = create_client_com(&leader).await.expect("msg not received");
-                results.get().set_leader(client);
-            };
-            Ok(())
-        })
-    }
-
-    fn create(
-        &mut self,
-        params: command::CreateParams,
-        mut results: command::CreateResults,
-    ) -> capnp::capability::Promise<(), capnp::Error> {
-        let commands_channel = self.commands_channel.clone();
-        let data = pry!(pry!(params.get()).get_data()).to_vec();
-        tracing::info!(action = "create");
-        Promise::from_future(async move {
-            let (msg, rx) = CommandMsg::create(data);
-            if let Err(err) = commands_channel.send(msg).await {
-                tracing::error!("error sending the create command {err}");
-                return Err(capnp::Error::failed(
-                    "error sending the create command".into(),
-                ));
-            };
-            match rx.await {
-                Ok(entry) => {
-                    results.get().set_item(capnp_rpc::new_client(Item {
-                        id: entry.id,
-                        data: entry.data,
-                        commands_channel,
-                    }));
-                }
-                Err(err) => {
-                    tracing::error!("error receiving the create command {err}");
-                    return Err(capnp::Error::failed(
-                        "error receiving the create command".into(),
-                    ));
-                }
-            };
-            Ok(())
-        })
-    }
-}
+use super::Server;
 
 impl raft::Server for Server {
     fn join_cluster(
@@ -178,23 +26,21 @@ impl raft::Server for Server {
         //TODO: check that the peer can join, that the history is correct, etc...
         let peer = pry!(request.get_peer());
 
-        let client = pry!(peer.get_client());
+        // let client = pry!(peer.get_client());
         let addr = pry!(pry!(peer.get_address()).to_str());
         let id = pry!(pry!(peer.get_id()).to_str());
 
         let addr = SocketAddr::from_str(addr).expect("failed to parse NodeId from string");
 
-        let msg = Peer::new(id, addr, client);
+        // let msg = Peer::new(id, addr, client);
 
-        //         let msg = PeersDisconnected::new(vec![PeerDisconnected::new(
-        //     id.into(), addr
-        // )].into_iter());
+        let msg = PeersDisconnected::new(vec![PeerDisconnected::new(id.into(), addr)].into_iter());
 
         tracing::info!(action = "requestJoinCluster", peer = %addr, id = %id);
 
         let channel = self.peers_channel.clone();
         Promise::from_future(async move {
-            channel.send(msg.into()).await.expect("msg not sent");
+            channel.send(msg).await.expect("msg not sent");
             Ok(())
         })
     }

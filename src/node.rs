@@ -15,11 +15,10 @@ use crate::{
     storage::LogEntry,
 };
 
-#[derive(Debug)]
 pub struct Node<S: Consensus + PeersManagement> {
     state: S,
     heartbeat_interval: f64,
-    election_timeout: f64,
+    election_timeout: Box<dyn FnMut() -> f64>,
     raft_channel: Receiver<RaftMsg>,
     commands_channel: Receiver<CommandMsg>,
     peers_channel: Receiver<NewPeer>,
@@ -30,7 +29,7 @@ impl<S: Consensus + PeersManagement> Node<S> {
     pub fn new(
         state: S,
         heartbeat_interval: f64,
-        election_timeout: f64,
+        election_timeout: Box<dyn FnMut() -> f64>,
         raft_channel: Receiver<RaftMsg>,
         commands_channel: Receiver<CommandMsg>,
         peers_channel: Receiver<NewPeer>,
@@ -106,6 +105,10 @@ impl<S: Consensus + PeersManagement> Node<S> {
         }
     }
 
+    fn election_dur(&mut self) -> Duration {
+        Duration::from_secs_f64((self.election_timeout)())
+    }
+
     async fn disconnect_peers(&mut self, failed_peers: &[usize]) {
         //TODO: maybe we want to avoid creating this task even if the failed_peers are empty
         if failed_peers.is_empty() {
@@ -119,10 +122,8 @@ impl<S: Consensus + PeersManagement> Node<S> {
     }
 
     pub async fn run(mut self) {
-        let heartbeat_dur = Duration::from_secs_f64(self.heartbeat_interval);
-        let election_dur = Duration::from_secs_f64(self.election_timeout);
-        let mut heartbeat_interval = interval(heartbeat_dur);
-        let mut election_timeout = Box::pin(sleep(election_dur));
+        let mut heartbeat_interval = interval(Duration::from_secs_f64(self.heartbeat_interval));
+        let mut election_timeout = Box::pin(sleep(self.election_dur()));
 
         let last_log_info = self.state.last_log_info();
         tracing::info!(action="starting", term=%self.state.current_term(), last_log_index=last_log_info.last_log_index(), last_log_term=last_log_info.last_log_term());
@@ -171,14 +172,14 @@ impl<S: Consensus + PeersManagement> Node<S> {
                             }
                         }
                     }
-                    election_timeout.as_mut().reset(Instant::now() + election_dur);
+                    election_timeout.as_mut().reset(Instant::now() + self.election_dur());
                 }
 
                 //TODO: maybe the following functions could be driven by the role and a trait
 
                 //  election timeout fires → start election
-                _ = &mut election_timeout, if self.state.role() != &Role::Leader => {
-                    election_timeout.as_mut().reset(Instant::now() + election_dur);
+                _ = &mut election_timeout, if matches!(self.state.role(), Role::Follower | Role::Candidate) => {
+                    election_timeout.as_mut().reset(Instant::now() + self.election_dur());
                     tracing::info!(action="becomeCandidate");
                     self.state.become_candidate();
                     tracing::info!(action="sendVotes");
@@ -188,7 +189,7 @@ impl<S: Consensus + PeersManagement> Node<S> {
                 }
 
                 //  heartbeat tick → send heartbeats if leader
-                _ = heartbeat_interval.tick(), if self.state.role() == &Role::Leader => {
+                _ = heartbeat_interval.tick(), if matches!(self.state.role(), Role::Leader)  => {
                     tracing::info!(action="sendHeartbeat");
                     //NOTE: for the heartbeat we don't really care about the error nor the number of successful append entries, or do we?
                     let _ =  self.send_entries(&[]).await;

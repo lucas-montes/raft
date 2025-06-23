@@ -76,7 +76,6 @@ async fn ws_handler(
 }
 
 async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterState) {
-    println!("socketing");
     let (mut socket_sender, mut socket_receiver) = socket.split();
 
     let (tx, mut rx) = mpsc::channel(100);
@@ -108,14 +107,14 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterSta
             let msg = match serde_json::to_string(&msg) {
                 Ok(json) => json,
                 Err(e) => {
-                    println!("Error serializing message: {:?}", e);
+                    eprintln!("Error serializing message: {:?}", e);
                     continue;
                 }
             };
 
             // Send the message to the WebSocket
             if let Err(err) = socket_sender.send(msg.into()).await {
-                println!("Error sending message to socket: {:?}", err);
+                eprintln!("Error sending message to socket: {:?}", err);
             }
         }
     });
@@ -176,11 +175,11 @@ enum ServerLogType {
     CreateHardState(ServerLog),
     PeerReconnectedSuccessfully(ServerLog),
     RequestJoinCluster(ServerLog),
+    ClusterJoined(ServerLog),
 }
 
 async fn spawn_node(port: String, address: String, state: &ClusterState) {
     let full_addr = format!("{}:{}", address, port);
-    println!("new node: {}", &full_addr);
     let mut cmd = Command::new("../target/debug/raft")
         .arg("--addr")
         .arg(&full_addr)
@@ -198,11 +197,11 @@ async fn spawn_node(port: String, address: String, state: &ClusterState) {
             match serde_json::from_str::<ServerLogType>(&line) {
                 Ok(cmd) => {
                     if let Err(err) = rx.send(cmd).await {
-                        println!("Error sending message to frontend");
+                        eprintln!("Error sending message to frontend");
                     }
                 }
                 Err(e) => {
-                    println!("Error parsing log: {:?} ; {:?}", e, line);
+                    eprintln!("Error parsing log: {:?} ; {:?}", e, line);
                 }
             }
         }

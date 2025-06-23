@@ -84,7 +84,7 @@ struct LogEntry {
 struct Peer {
   id @0 :Text;
   address @1 :Text;
-  client @2 :Raft;
+  # client @2 :Raft;
 }
 
 struct HardState {
