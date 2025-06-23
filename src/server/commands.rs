@@ -3,7 +3,7 @@ use capnp_rpc::pry;
 
 use tokio::sync::mpsc::Sender;
 
-use crate::{client::create_client_com, dto::CommandMsg, storage_capnp::command,};
+use crate::{client::create_client_com, dto::CommandMsg, storage_capnp::command};
 
 use super::Server;
 
@@ -14,12 +14,40 @@ struct Item {
 }
 
 impl command::item::Server for Item {
+    fn delete(
+        &mut self,
+        _: command::item::DeleteParams,
+        _: command::item::DeleteResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        let commands_channel = self.commands_channel.clone();
+        let id: String = self.id.clone();
+        tracing::info!(action = "delete");
+        Promise::from_future(async move {
+            let (msg, rx) = CommandMsg::delete(id);
+            if let Err(err) = commands_channel.send(msg).await {
+                tracing::error!("error sending the delete command {err}");
+                return Err(capnp::Error::failed(
+                    "error sending the delete command".into(),
+                ));
+            };
+            match rx.await {
+                Ok(_) => Ok(()),
+                Err(err) => {
+                    tracing::error!("error receiving the delete command {err}");
+                    Err(capnp::Error::failed(
+                        "error receiving the delete command".into(),
+                    ))
+                }
+            }
+        })
+    }
     fn read(
         &mut self,
         _: command::item::ReadParams,
         mut results: command::item::ReadResults,
     ) -> capnp::capability::Promise<(), capnp::Error> {
         let mut data = results.get().init_data();
+        tracing::info!(action = "read");
         data.set_data(&self.data);
         data.set_id(&self.id);
         Promise::ok(())
@@ -33,6 +61,7 @@ impl command::item::Server for Item {
         let data = pry!(pry!(params.get()).get_data()).to_vec();
         let commands_channel = self.commands_channel.clone();
         let id = self.id.clone();
+        tracing::info!(action = "update");
         Promise::from_future(async move {
             let (msg, rx) = CommandMsg::update(id, data);
             if let Err(err) = commands_channel.send(msg).await {
@@ -79,6 +108,19 @@ impl command::Server for Server {
             };
             Ok(())
         })
+    }
+
+    fn get(
+        &mut self,
+        params: command::GetParams,
+        mut results: command::GetResults,
+    ) -> capnp::capability::Promise<(), capnp::Error> {
+        results.get().set_item(capnp_rpc::new_client(Item {
+            id: pry!(pry!(pry!(params.get()).get_id()).to_string()),
+            data: vec![],
+            commands_channel: self.commands_channel.clone(),
+        }));
+        Promise::ok(())
     }
 
     fn create(

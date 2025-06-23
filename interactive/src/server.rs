@@ -133,7 +133,6 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterSta
                 }
             };
 
-            // Send the message to the WebSocket
             if let Err(err) = socket_sender.send(msg.into()).await {
                 eprintln!("Error sending message to socket: {:?}", err);
             }
@@ -149,28 +148,35 @@ enum FrontendCommand {
     CrudOperation(CrudRequest),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct ServerLogSpan {
     addr: SocketAddr,
     name: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct ServerLog {
     timestamp: String,
     span: ServerLogSpan,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct ServerLogError {
+    message: String,
+    err: String,
+    #[serde(flatten)]
+    data: ServerLog,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "camelCase")]
-pub enum ServerLogType {
+enum ServerLogType {
     Starting(ServerLog),
     SendAppendEntries(ServerLog),
     SendHeartbeat(ServerLog),
     SendVotes(ServerLog),
     StartTransaction(ServerLog),
     VotingFor(ServerLog),
-    Create(ServerLog),
     ReceiveAppendEntries(ServerLog),
     ReceiveVote(ServerLog),
     BecomeCandidate(ServerLog),
@@ -180,6 +186,17 @@ pub enum ServerLogType {
     PeerReconnectedSuccessfully(ServerLog),
     RequestJoinCluster(ServerLog),
     ClusterJoined(ServerLog),
+    Read(ServerLog),
+    Update(ServerLog),
+    Delete(ServerLog),
+    Create(ServerLog),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "level", rename_all = "UPPERCASE")]
+enum ServerLogLevel {
+    Error(ServerLogError),
+    Info(ServerLogType),
 }
 
 async fn spawn_node(port: String, address: String, state: &ClusterState) {
@@ -198,12 +215,17 @@ async fn spawn_node(port: String, address: String, state: &ClusterState) {
         let reader = tokio::io::BufReader::new(stdout);
         let mut lines = reader.lines();
         while let Some(line) = lines.next_line().await.unwrap() {
-            match serde_json::from_str::<ServerLogType>(&line) {
-                Ok(cmd) => {
-                    if let Err(err) = rx.send(cmd).await {
-                        eprintln!("Error sending message to frontend");
+            match serde_json::from_str::<ServerLogLevel>(&line) {
+                Ok(cmd) => match cmd {
+                    ServerLogLevel::Error(log) => {
+                        eprintln!("Error log: {:?}", log);
                     }
-                }
+                    ServerLogLevel::Info(log) => {
+                        if let Err(err) = rx.send(log).await {
+                            eprintln!("Error sending message to frontend");
+                        }
+                    }
+                },
                 Err(e) => {
                     eprintln!("Error parsing log: {:?} ; {:?}", e, line);
                 }

@@ -127,6 +127,14 @@ pub enum CommandMsg {
 }
 
 impl CommandMsg {
+    pub fn delete(id: String) -> (Self, Receiver<Entry>) {
+        let (tx, rx) = oneshot::channel();
+        let msg = Self::Modify(Msg {
+            msg: Operation::Delete(id),
+            sender: tx,
+        });
+        (msg, rx)
+    }
     pub fn create(data: Vec<u8>) -> (Self, Receiver<Entry>) {
         let (tx, rx) = oneshot::channel();
         let msg = Self::Modify(Msg {

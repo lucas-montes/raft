@@ -25,20 +25,20 @@
         };
 
         run-raft = pkgs.writeShellScriptBin "run-raft" ''
-        set -e
-          echo "Building Rust Raft implementation..."
-          cargo build
+          set -e
+            echo "Building Rust Raft implementation..."
+            cargo fmt
+            cargo build
 
-            if [ $? -ne 0 ]; then
-            echo "❌ Main Raft build failed!"
-            exit 1
-          fi
+              if [ $? -ne 0 ]; then
+              echo "❌ Main Raft build failed!"
+              exit 1
+            fi
 
-          echo "Starting visual frontend..."
-          cd visual
-          cargo run
+            echo "Starting visual frontend..."
+            cd interactive
+            cargo run
         '';
-
       in {
         devShells.default = with pkgs;
           mkShell {
@@ -48,9 +48,8 @@
               capnproto
               pkg-config
               rust-bin-custom
-run-raft
+              run-raft
             ];
-
           };
       }
     );

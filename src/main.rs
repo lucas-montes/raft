@@ -108,7 +108,7 @@ async fn main() {
                 tokio::sync::mpsc::channel(cli.peers_task_channel_size);
 
             let server = Server::new(raft_tx, commands_tx, peers_task_tx.clone());
-            let join_cluster_client = capnp_rpc::new_client(server.clone());
+
             let server_task = tokio::task::spawn_local(server.run(cli.addr));
 
             let state = State::new(NodeId::new(cli.addr), cli.state_path);
@@ -134,14 +134,10 @@ async fn main() {
             );
             let peers_task = tokio::task::spawn_local(reconnection_task.run());
 
-            join_cluster(
-                cli.addr,
-                log_info,
-                join_cluster_client,
-                cli.nodes,
-                peers_task_tx,
-            )
-            .await;
+            let mut nodes = cli.nodes;
+            nodes.retain(|addr| addr != &cli.addr);
+
+            join_cluster(cli.addr, log_info, nodes, peers_task_tx).await;
 
             match tokio::try_join!(server_task, node_task, peers_task) {
                 Ok(_) => {
@@ -158,7 +154,6 @@ async fn main() {
 async fn join_cluster(
     addr: SocketAddr,
     log_info: LogsInformation,
-    client: raft::Client,
     nodes: Vec<SocketAddr>,
     peers_task_tx: Sender<PeersDisconnected>,
 ) {
@@ -168,11 +163,17 @@ async fn join_cluster(
         return;
     }
 
+    let mut count = 0;
+
     loop {
         for cluster_addr in &nodes {
-            let cluster_client = create_client(&cluster_addr)
-                .await
-                .expect("Failed to create client for the cluster connection");
+            let cluster_client = match create_client(&cluster_addr).await {
+                Ok(client) => client,
+                Err(err) => {
+                    tracing::error!(error = ?err, "Failed to create client for cluster address");
+                    continue;
+                }
+            };
 
             let mut req = cluster_client
                 .get_leader_request()
@@ -193,27 +194,49 @@ async fn join_cluster(
             match req.send().promise.await {
                 Ok(response) => match response.get() {
                     Ok(response) => {
-                        tracing::info!(action = "clusterJoined");
                         if let Ok(peers) = response.get_peers() {
-
                             peers_task_tx
-                                .send(peers::PeersDisconnected::new(peers.iter().map(
-                                    |addr| peers::PeerDisconnected::new(NodeId::new(addr.get_id().unwrap().to_str().unwrap().parse().unwrap()), addr.get_address().unwrap().to_str().unwrap().parse().unwrap()),
-                                )))
+                                .send(peers::PeersDisconnected::new(peers.iter().map(|addr| {
+                                    peers::PeerDisconnected::new(
+                                        NodeId::new(
+                                            addr.get_id()
+                                                .unwrap()
+                                                .to_str()
+                                                .unwrap()
+                                                .parse()
+                                                .unwrap(),
+                                        ),
+                                        addr.get_address()
+                                            .unwrap()
+                                            .to_str()
+                                            .unwrap()
+                                            .parse()
+                                            .unwrap(),
+                                    )
+                                })))
                                 .await
-                                .expect("Failed to send initial peers");
+                                .expect("Failed to receive initial peers");
                         };
+                        //TODO: if on peers then oupsi
+                        tracing::info!(action = "clusterJoined");
+                        return;
                     }
                     Err(err) => {
-                        tracing::error!(error = ?err, "Failed to join cluster");
+                        tracing::error!(err = ?err, "Failed to join cluster");
                         continue;
                     }
                 },
                 Err(err) => {
-                    tracing::error!(error = ?err, "Failed to join cluster");
+                    tracing::error!(err = ?err, "Failed to join cluster");
                     continue;
                 }
             };
         }
+        count += 1;
+        if count >= 5 {
+            tracing::error!("Failed to join cluster after {} attempts", count);
+            panic!("Failed to join cluster after multiple attempts");
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 }

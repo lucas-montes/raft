@@ -8,8 +8,8 @@ use crate::{
     dto::{AppendEntriesResponse, VoteResponse},
     peers::{Peers, PeersManagement},
     raft_capnp::raft,
-    storage_capnp::command,
     storage::LogEntry,
+    storage_capnp::command,
 };
 
 struct RequestError {
