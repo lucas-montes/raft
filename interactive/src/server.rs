@@ -23,17 +23,21 @@ use futures::{sink::SinkExt, stream::StreamExt};
 use std::{collections::HashMap, net::SocketAddr, path::PathBuf, process::Stdio, sync::Arc};
 use tower_http::services::ServeDir;
 
+use crate::dto::{CrudMessage, CrudRequest, LocalSpawner};
+
 #[derive(Clone)]
 struct ClusterState {
     nodes: Arc<RwLock<HashMap<SocketAddr, NodeInfo>>>,
     front_transmission: Option<Sender<ServerLogType>>,
+    spawner: LocalSpawner,
 }
 
 impl ClusterState {
-    fn new() -> Self {
+    fn new(spawner: LocalSpawner) -> Self {
         ClusterState {
             nodes: Arc::new(RwLock::new(HashMap::new())),
             front_transmission: None,
+            spawner,
         }
     }
 
@@ -57,10 +61,10 @@ impl NodeInfo {
     }
 }
 
-pub async fn main(addr: &SocketAddr) {
+pub async fn main(addr: &SocketAddr, spawner: LocalSpawner) {
     let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates");
 
-    let state = ClusterState::new();
+    let state = ClusterState::new(spawner);
 
     let app = Router::new()
         .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
@@ -89,7 +93,6 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterSta
     let (mut socket_sender, mut socket_receiver) = socket.split();
 
     let (tx, mut rx) = mpsc::channel(100);
-
     state.front_transmission = Some(tx);
 
     tokio::spawn(async move {
@@ -103,16 +106,13 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterSta
                         FrontendCommand::RemoveNode { id } => {
                             remove_node(id.parse().expect("addr should be valid"), &state).await;
                         }
-                        FrontendCommand::CrudOperation {
-                            operation,
-                            id,
-                            data,
-                        } => {
-                            // Handle CRUD operations here
-                            println!(
-                                "Received CRUD operation: {:?} with data: {:?} and id: {:?}",
-                                operation, data, id
-                            );
+                        FrontendCommand::CrudOperation(req) => {
+                            if let Err(e) = state.spawner.spawn(CrudMessage {
+                                request: req,
+                                nodes: state.get_nodes().await,
+                            }) {
+                                eprintln!("Error sending CRUD request: {:?}", e);
+                            }
                         }
                     },
                     Err(e) => {
@@ -142,28 +142,11 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterSta
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-enum CrudOperation {
-    Create,
-    Read,
-    Update,
-    Delete,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "action", rename_all = "camelCase")]
 enum FrontendCommand {
-    AddNode {
-        addr: String,
-        port: String,
-    },
-    RemoveNode {
-        id: String,
-    },
-    CrudOperation {
-        operation: CrudOperation,
-        id: Option<String>,
-        data: Option<String>,
-    },
+    AddNode { addr: String, port: String },
+    RemoveNode { id: String },
+    CrudOperation(CrudRequest),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -180,7 +163,7 @@ struct ServerLog {
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "camelCase")]
-enum ServerLogType {
+pub enum ServerLogType {
     Starting(ServerLog),
     SendAppendEntries(ServerLog),
     SendHeartbeat(ServerLog),

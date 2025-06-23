@@ -1,7 +1,11 @@
 use clap::{Parser, ValueEnum};
+use client::handle_request;
+use dto::{CrudMessage, CrudRequest, LocalSpawner};
 use std::net::SocketAddr;
+use tokio::{sync::mpsc, task::LocalSet};
 
 mod client;
+mod dto;
 mod server;
 
 pub mod storage_capnp {
@@ -27,11 +31,15 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.side {
-        Side::Client => client::main(&cli.addr).await,
-        Side::Server => server::main(&cli.addr).await,
-    }
+        Side::Client => {
+            tokio::task::LocalSet::new()
+                .run_until(client::main(&cli.addr))
+                .await;
+        }
+        Side::Server => {
+            let spawner = LocalSpawner::new();
 
-    // tokio::task::LocalSet::new()
-    //     .run_until(request(&cli.addr))
-    //     .await;
+            server::main(&cli.addr, spawner).await
+        }
+    }
 }
