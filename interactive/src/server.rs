@@ -1,7 +1,8 @@
 use axum::{
     Router,
-    extract::{connect_info::ConnectInfo,
+    extract::{
         State,
+        connect_info::ConnectInfo,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::IntoResponse,
@@ -18,9 +19,9 @@ use tokio::{
     },
 };
 
-use std::{collections::HashMap, process::Stdio, sync::Arc, net::SocketAddr, path::PathBuf};
-use tower_http::services::ServeDir;
 use futures::{sink::SinkExt, stream::StreamExt};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, process::Stdio, sync::Arc};
+use tower_http::services::ServeDir;
 
 #[derive(Clone)]
 struct ClusterState {
@@ -37,7 +38,9 @@ impl ClusterState {
     }
 
     async fn get_nodes(&self) -> Vec<String> {
-        self.nodes.read().await
+        self.nodes
+            .read()
+            .await
             .keys()
             .map(|addr| addr.to_string())
             .collect()
@@ -50,21 +53,28 @@ struct NodeInfo {
 
 impl NodeInfo {
     fn new(process: Child) -> Self {
-        NodeInfo {
-            process,
-        }
+        NodeInfo { process }
     }
 }
 
-fn app() -> Router {
+pub async fn main(addr: &SocketAddr) {
     let assets_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("templates");
 
     let state = ClusterState::new();
 
-    Router::new()
+    let app = Router::new()
         .fallback_service(ServeDir::new(assets_dir).append_index_html_on_directories(true))
         .route("/ws", any(ws_handler))
-        .with_state(state)
+        .with_state(state);
+
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    println!("listening on {}", listener.local_addr().unwrap());
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
 
 async fn ws_handler(
@@ -93,6 +103,17 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterSta
                         FrontendCommand::RemoveNode { id } => {
                             remove_node(id.parse().expect("addr should be valid"), &state).await;
                         }
+                        FrontendCommand::CrudOperation {
+                            operation,
+                            id,
+                            data,
+                        } => {
+                            // Handle CRUD operations here
+                            println!(
+                                "Received CRUD operation: {:?} with data: {:?} and id: {:?}",
+                                operation, data, id
+                            );
+                        }
                     },
                     Err(e) => {
                         println!("Error parsing command: {:?}", e);
@@ -118,31 +139,31 @@ async fn handle_socket(socket: WebSocket, who: SocketAddr, mut state: ClusterSta
             }
         }
     });
-
-
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
+enum CrudOperation {
+    Create,
+    Read,
+    Update,
+    Delete,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "action", rename_all = "camelCase")]
 enum FrontendCommand {
-    AddNode { addr: String, port: String },
-    RemoveNode { id: String },
-}
-
-#[tokio::main]
-async fn main() {
-    let app = app();
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
-        .await
-        .unwrap();
-    println!("listening on {}", listener.local_addr().unwrap());
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await
-    .unwrap();
+    AddNode {
+        addr: String,
+        port: String,
+    },
+    RemoveNode {
+        id: String,
+    },
+    CrudOperation {
+        operation: CrudOperation,
+        id: Option<String>,
+        data: Option<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -209,7 +230,7 @@ async fn spawn_node(port: String, address: String, state: &ClusterState) {
 
     state.nodes.write().await.insert(
         full_addr.parse().expect("the address should be valid"),
-        NodeInfo::new(cmd)
+        NodeInfo::new(cmd),
     );
 }
 

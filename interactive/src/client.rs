@@ -1,23 +1,13 @@
 use std::net::SocketAddr;
 
-use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
-use clap::Parser;
+use capnp_rpc::{RpcSystem, rpc_twoparty_capnp, twoparty};
 use futures::AsyncReadExt;
-use rand::random_range;
 
-pub mod raft_capnp {
-    include!(concat!(env!("OUT_DIR"), "/raft_capnp.rs"));
-}
-
-#[derive(Debug, Parser)]
-pub struct Cli {
-    #[arg(short, long)]
-    addr: SocketAddr,
-}
+use crate::storage_capnp;
 
 pub async fn create_client_com(
     addr: &SocketAddr,
-) -> Result<raft_capnp::command::Client, Box<dyn std::error::Error>> {
+) -> Result<storage_capnp::command::Client, Box<dyn std::error::Error>> {
     let stream = tokio::net::TcpStream::connect(addr).await?;
     stream.set_nodelay(true)?;
     let (reader, writer) = tokio_util::compat::TokioAsyncReadCompatExt::compat(stream).split();
@@ -34,8 +24,8 @@ pub async fn create_client_com(
     Ok(client)
 }
 
-async fn request(cli: Cli) {
-    let client = create_client_com(&cli.addr).await.expect("client failed");
+pub async fn main(addr: &SocketAddr) {
+    let client = create_client_com(addr).await.expect("client failed");
     let req = client.start_transaction_request();
     let leader_client = req.send().pipeline.get_leader();
 
@@ -50,13 +40,4 @@ async fn request(cli: Cli) {
     let result = raw_result.get_data().unwrap();
     println!("response: {:?}", String::from_utf8_lossy(result));
     println!("response: {:?}", raw_result);
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let cli = Cli::parse();
-
-    tokio::task::LocalSet::new()
-        .run_until(request(cli))
-        .await;
 }

@@ -7,7 +7,8 @@ use crate::{
     consensus::Consensus,
     dto::{AppendEntriesResponse, VoteResponse},
     peers::{Peers, PeersManagement},
-    raft_capnp::{command, raft},
+    raft_capnp::raft,
+    storage_capnp::command,
     storage::LogEntry,
 };
 

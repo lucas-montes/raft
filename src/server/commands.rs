@@ -3,7 +3,7 @@ use capnp_rpc::pry;
 
 use tokio::sync::mpsc::Sender;
 
-use crate::{client::create_client_com, dto::CommandMsg, raft_capnp::command};
+use crate::{client::create_client_com, dto::CommandMsg, storage_capnp::command,};
 
 use super::Server;
 

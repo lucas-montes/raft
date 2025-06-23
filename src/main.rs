@@ -17,6 +17,10 @@ pub mod raft_capnp {
     include!(concat!(env!("OUT_DIR"), "/raft_capnp.rs"));
 }
 
+pub mod storage_capnp {
+    include!(concat!(env!("OUT_DIR"), "/storage_capnp.rs"));
+}
+
 mod client;
 mod consensus;
 mod dto;

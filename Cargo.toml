@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-capnp = "0.20.3"
-capnp-rpc = "0.20.3"
-clap = { version = "4.5.37", features = ["derive"] }
-futures = "0.3.0"
-rand = "0.9.0"
-tokio = { version = "1.4.0", features = ["net", "rt", "macros", "time", "rt-multi-thread", "sync", "io-util", "fs"]}
-tokio-util = { version = "0.7.4", features = ["compat"] }
+capnp.workspace = true
+capnp-rpc.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+clap.workspace = true
+futures.workspace = true
+rand.workspace = true
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["json"] }
 
@@ -22,3 +22,17 @@ features = [
 
 [build-dependencies]
 capnpc = "0.20.1"
+
+[workspace]
+members = [
+    "interactive",
+]
+
+[workspace.dependencies]
+capnp = "0.20.3"
+capnp-rpc = "0.20.3"
+clap = { version = "4.5.37", features = ["derive"] }
+futures = "0.3.0"
+rand = "0.9.0"
+tokio = { version = "1.4.0", features = ["net", "rt", "macros", "time", "rt-multi-thread", "sync", "io-util", "fs"]}
+tokio-util = { version = "0.7.4", features = ["compat"] }

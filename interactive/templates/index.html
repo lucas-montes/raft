@@ -41,7 +41,7 @@
         }
 
         #cluster-visualization {
-            flex: 3;
+            flex: 2;
             background: white;
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
@@ -65,25 +65,36 @@
             height: fit-content;
         }
 
-        #controls h3 {
+        #crud-operations {
+            width: 320px;
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            height: fit-content;
+            max-height: calc(100vh - 440px);
+            overflow-y: auto;
+        }
+
+        #controls h3, #crud-operations h3 {
             margin-top: 0;
             color: #495057;
             border-bottom: 2px solid #e9ecef;
             padding-bottom: 10px;
         }
 
-        #controls form {
+        #controls form, #crud-operations form {
             margin-bottom: 20px;
         }
 
-        #controls label {
+        #controls label, #crud-operations label {
             display: block;
             margin: 10px 0 5px 0;
             color: #6c757d;
             font-weight: 500;
         }
 
-        #controls input, #controls select {
+        #controls input, #controls select, #crud-operations input, #crud-operations select, #crud-operations textarea {
             width: 100%;
             padding: 8px 12px;
             border: 1px solid #ced4da;
@@ -91,7 +102,13 @@
             box-sizing: border-box;
         }
 
-        #controls button {
+        #crud-operations textarea {
+            min-height: 80px;
+            resize: vertical;
+            font-family: 'Courier New', monospace;
+        }
+
+        #controls button, #crud-operations button {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
@@ -104,8 +121,89 @@
             transition: transform 0.2s;
         }
 
-        #controls button:hover {
+        #controls button:hover, #crud-operations button:hover {
             transform: translateY(-1px);
+        }
+
+        .crud-button-create {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%) !important;
+        }
+
+        .crud-button-read {
+            background: linear-gradient(135deg, #007bff 0%, #6f42c1 100%) !important;
+        }
+
+        .crud-button-update {
+            background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%) !important;
+        }
+
+        .crud-button-delete {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%) !important;
+        }
+
+        .response-container {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .response-container h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+            font-size: 14px;
+        }
+
+        .response-content {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            color: #495057;
+        }
+
+        .response-success {
+            border-color: #28a745;
+            background: #d4edda;
+        }
+
+        .response-error {
+            border-color: #dc3545;
+            background: #f8d7da;
+        }
+
+        .operation-tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .tab {
+            padding: 10px 15px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: #6c757d;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: #495057;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
         }
 
         .node {
@@ -309,6 +407,61 @@
                 <option value="">Select node to remove</option>
             </select>
             <button id="remove-node-btn">Remove Node</button>
+        </div>
+
+        <div id="crud-operations">
+            <h3>CRUD Operations</h3>
+
+            <div class="operation-tabs">
+                <div class="tab active" data-tab="create">Create</div>
+                <div class="tab" data-tab="read">Read</div>
+                <div class="tab" data-tab="update">Update</div>
+                <div class="tab" data-tab="delete">Delete</div>
+            </div>
+
+            <!-- Create Tab -->
+            <div id="create-tab" class="tab-content active">
+                <form id="create-form">
+                    <label>Data (JSON):</label>
+                    <textarea id="create-data" placeholder='{"key": "value", "name": "example"}' required></textarea>
+                    <button type="submit" class="crud-button-create">Create Record</button>
+                </form>
+            </div>
+
+            <!-- Read Tab -->
+            <div id="read-tab" class="tab-content">
+                <form id="read-form">
+                    <label>Record ID:</label>
+                    <input type="text" id="read-id" placeholder="Enter record ID" required>
+                    <button type="submit" class="crud-button-read">Read Record</button>
+                </form>
+            </div>
+
+            <!-- Update Tab -->
+            <div id="update-tab" class="tab-content">
+                <form id="update-form">
+                    <label>Record ID:</label>
+                    <input type="text" id="update-id" placeholder="Enter record ID" required>
+                    <label>New Data (JSON):</label>
+                    <textarea id="update-data" placeholder='{"key": "new_value", "updated": true}' required></textarea>
+                    <button type="submit" class="crud-button-update">Update Record</button>
+                </form>
+            </div>
+
+            <!-- Delete Tab -->
+            <div id="delete-tab" class="tab-content">
+                <form id="delete-form">
+                    <label>Record ID:</label>
+                    <input type="text" id="delete-id" placeholder="Enter record ID" required>
+                    <button type="submit" class="crud-button-delete">Delete Record</button>
+                </form>
+            </div>
+
+            <!-- Response Container -->
+            <div id="crud-response" class="response-container" style="display: none;">
+                <h4>Response:</h4>
+                <div id="crud-response-content" class="response-content"></div>
+            </div>
         </div>
     </div>
 

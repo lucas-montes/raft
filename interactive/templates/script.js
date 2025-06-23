@@ -74,6 +74,8 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx = canvas.getContext('2d');
     resizeCanvas();
     startAnimationLoop();
+    initializeCrudTabs();
+    initializeCrudForms();
 });
 
 // WebSocket event handlers
@@ -486,3 +488,129 @@ document.addEventListener('DOMContentLoaded', () => {
     resizeCanvas();
     updateStatus();
 });
+
+function initializeCrudTabs() {
+    const tabs = document.querySelectorAll('.tab');
+    const tabContents = document.querySelectorAll('.tab-content');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Remove active class from all tabs and contents
+            tabs.forEach(t => t.classList.remove('active'));
+            tabContents.forEach(tc => tc.classList.remove('active'));
+
+            // Add active class to clicked tab
+            tab.classList.add('active');
+
+            // Show corresponding content
+            const tabId = tab.getAttribute('data-tab') + '-tab';
+            const content = document.getElementById(tabId);
+            if (content) {
+                content.classList.add('active');
+            }
+        });
+    });
+}
+
+
+function initializeCrudForms() {
+    // Create form
+    const createForm = document.getElementById('create-form');
+    if (createForm) {
+        createForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const data = document.getElementById('create-data').value;
+
+            try {
+                JSON.parse(data); // Validate JSON
+                await sendCrudRequest('Create', { data });
+                createForm.reset();
+            } catch (error) {
+                showCrudResponse('Invalid JSON format', false);
+            }
+        });
+    }
+
+    // Read form
+    const readForm = document.getElementById('read-form');
+    if (readForm) {
+        readForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('read-id').value;
+            await sendCrudRequest('Read', { id });
+        });
+    }
+
+    // Update form
+    const updateForm = document.getElementById('update-form');
+    if (updateForm) {
+        updateForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('update-id').value;
+            const data = document.getElementById('update-data').value;
+
+            try {
+                JSON.parse(data); // Validate JSON
+                await sendCrudRequest('Update', { id, data });
+                updateForm.reset();
+            } catch (error) {
+                showCrudResponse('Invalid JSON format', false);
+            }
+        });
+    }
+
+    // Delete form
+    const deleteForm = document.getElementById('delete-form');
+    if (deleteForm) {
+        deleteForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('delete-id').value;
+            await sendCrudRequest('Delete', { id });
+            deleteForm.reset();
+        });
+    }
+}
+
+
+
+async function sendCrudRequest(operation, payload) {
+    try {
+        showCrudResponse('Sending request...', true);
+
+        // Send CRUD request through WebSocket
+        const message = {
+            action: 'crudOperation',
+            operation,
+            ...payload
+        };
+
+        ws.send(JSON.stringify(message));
+
+        // Note: In a real implementation, you'd want to handle the response
+        // For now, we'll just show a success message
+        setTimeout(() => {
+            showCrudResponse(`${operation.toUpperCase()} operation sent successfully`, true);
+        }, 500);
+
+    } catch (error) {
+        showCrudResponse(`Error: ${error.message}`, false);
+    }
+}
+
+function showCrudResponse(message, isSuccess) {
+    const responseContainer = document.getElementById('crud-response');
+    const responseContent = document.getElementById('crud-response-content');
+
+    if (responseContainer && responseContent) {
+        responseContainer.style.display = 'block';
+        responseContainer.className = `response-container ${isSuccess ? 'response-success' : 'response-error'}`;
+        responseContent.textContent = message;
+
+        // Auto-hide after 5 seconds
+        setTimeout(() => {
+            if (!isSuccess || message.includes('sent successfully')) {
+                responseContainer.style.display = 'none';
+            }
+        }, 5000);
+    }
+}
