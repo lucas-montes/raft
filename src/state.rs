@@ -285,6 +285,7 @@ impl Consensus for State {
 
     fn become_candidate(&mut self) {
         self.role = Role::Candidate;
+        tracing::info!(action = "becomeCandidate");
         self.hard_state.current_term += 1;
         self.hard_state.voted_for = Some(self.id);
         // self.soft_state.commit_index = 0;
@@ -294,13 +295,20 @@ impl Consensus for State {
 
     fn become_follower(&mut self, leader_id: Option<SocketAddr>, new_term: u64) {
         self.hard_state.current_term = new_term;
+        tracing::info!(action = "becomeFollower", term = new_term);
         self.hard_state.voted_for = None;
+        self.role = Role::Follower;
         // self.soft_state.commit_index = 0;
         self.leader = leader_id.map(NodeId::new);
     }
 
     fn become_leader(&mut self) {
         self.role = Role::Leader;
+        tracing::info!(
+            action = "becomeLeader",
+            term = self.current_term(),
+            peers = self.cluster_size()
+        );
         self.leader = Some(self.id);
         // self.leader_state.match_index = vec![(self.id, 0)];
         // self.leader_state.next_index = vec![(self.id, 0)];

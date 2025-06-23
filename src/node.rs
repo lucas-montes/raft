@@ -174,71 +174,72 @@ impl<S: Consensus + PeersManagement> Node<S> {
 
         loop {
             tokio::select! {
-                // Calls to manage peers reconnection
-                Some(rpc) = self.peers_channel.recv() => {
-                    self.state.add_peer(rpc);
-                }
-
-                //  Incoming RPCs from external users
-                Some(rpc) = self.commands_channel.recv() => {
-                    self.handle_command(rpc).await;
-                }
-
-                // RPCs from the cluster's leader
-                Some(rpc) = self.raft_channel.recv() => {
-                    match rpc {
-                        RaftMsg::AppendEntries(req) => {
-                            let msg = req.msg;
-                            let sender = req.sender;
-                            let resp = self.state.handle_append_entries(
-                                msg.term,
-                                &msg.leader_id,
-                                msg.prev_log_index as usize,
-                                msg.prev_log_term,
-                                msg.leader_commit,
-                                msg.entries,
-                            );
-                            if sender.send(resp).is_err(){
-                                tracing::error!("Failed to send response in channel for append entries");
-                            }
-                        }
-                        RaftMsg::Vote(req) => {
-                            let msg = req.msg;
-                            let sender = req.sender;
-                            let resp = self.state.handle_request_vote(
-                                msg.term(),
-                                msg.candidate_id(),
-                                msg.last_log_index(),
-                                msg.last_log_term(),
-                            );
-                            if sender.send(resp).is_err(){
-                                tracing::error!("Failed to send response in channel for vote");
-                            }
-                        }
+                    // Calls to manage peers reconnection
+                    Some(rpc) = self.peers_channel.recv() => {
+                        self.state.add_peer(rpc);
                     }
-                    election_timeout.as_mut().reset(Instant::now() + self.election_dur());
-                }
 
-                //TODO: maybe the following functions could be driven by the role and a trait
+                    //  Incoming RPCs from external users
+                    Some(rpc) = self.commands_channel.recv() => {
+                        self.handle_command(rpc).await;
+                    }
 
-                //  election timeout fires → start election
-                _ = &mut election_timeout, if matches!(self.state.role(), Role::Follower | Role::Candidate) => {
-                    election_timeout.as_mut().reset(Instant::now() + self.election_dur());
-                    tracing::info!(action="becomeCandidate");
-                    self.state.become_candidate();
-                    tracing::info!(action="sendVotes");
-                    let result = vote(&self.state, self.state.peers()).await;
-                    self.state.count_votes(result.votes_granted());
-                    self.disconnect_peers(result.failed_peers()).await;
-                }
+                    // RPCs from the cluster's leader
+                    Some(rpc) = self.raft_channel.recv() => {
+                        match rpc {
+                            RaftMsg::AppendEntries(req) => {
+                                let msg = req.msg;
+                                let sender = req.sender;
+                                let resp = self.state.handle_append_entries(
+                                    msg.term,
+                                    &msg.leader_id,
+                                    msg.prev_log_index as usize,
+                                    msg.prev_log_term,
+                                    msg.leader_commit,
+                                    msg.entries,
+                                );
+                                if sender.send(resp).is_err(){
+                                    tracing::error!("Failed to send response in channel for append entries");
+                                }
+                            }
+                            RaftMsg::Vote(req) => {
+                                let msg = req.msg;
+                                let sender = req.sender;
+                                let resp = self.state.handle_request_vote(
+                                    msg.term(),
+                                    msg.candidate_id(),
+                                    msg.last_log_index(),
+                                    msg.last_log_term(),
+                                );
+                                if sender.send(resp).is_err(){
+                                    tracing::error!("Failed to send response in channel for vote");
+                                }
+                            }
+                        }
+                        election_timeout.as_mut().reset(Instant::now() + self.election_dur());
+                    }
 
-                //  heartbeat tick → send heartbeats if leader
-                _ = heartbeat_interval.tick(), if matches!(self.state.role(), Role::Leader)  => {
-                    tracing::info!(action="sendHeartbeat");
-                    //NOTE: for the heartbeat we don't really care about the error nor the number of successful append entries, or do we?
-                    let _ =  self.send_entries(&[]).await;
-                }
+                    //TODO: maybe the following functions could be driven by the role and a trait
+
+                    //  election timeout fires → start election
+                    _ = &mut election_timeout, if matches!(self.state.role(), Role::Follower | Role::Candidate) => {
+                        election_timeout.as_mut().reset(Instant::now() + self.election_dur());
+                        self.state.become_candidate();
+                        tracing::info!(action="sendVotes");
+                        let result = vote(&self.state, self.state.peers()).await;
+                        if self.state.is_majority(result.votes_granted()) {
+                self.state.become_leader();
             }
+                        self.disconnect_peers(result.failed_peers()).await;
+                    }
+
+                    //  heartbeat tick → send heartbeats if leader
+                    _ = heartbeat_interval.tick(), if matches!(self.state.role(), Role::Leader)  => {
+                        tracing::info!(action="sendHeartbeat");
+                        //NOTE: for the heartbeat we don't really care about the error nor the number of successful append entries, or do we?
+                        let _ =  self.send_entries(&[]).await;
+                    }
+                }
         }
     }
 
@@ -254,7 +255,6 @@ impl<S: Consensus + PeersManagement> Node<S> {
             Err(err) => {
                 //NOTE: maybe check if the term is lower? normally it's as the follower is validating it
                 self.state.become_follower(None, err.higher_term());
-                tracing::info!(action = "becomeFollower", term = err.higher_term());
                 self.disconnect_peers(err.failed_peers()).await;
                 Err(())
             }

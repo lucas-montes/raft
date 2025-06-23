@@ -46,12 +46,14 @@ pub trait Consensus {
             return AppendEntriesResult::TermMismatch(self.current_term());
         }
 
-        self.become_follower(
+        if self.role() != &Role::Follower {
+            self.become_follower(
             Some(
                 SocketAddr::from_str(leader_id).expect("why leader_id isnt a correct socketaddrs?"),
             ),
             term,
         );
+        }
 
         let current_entries = &mut *self.log_entries();
 
@@ -127,25 +129,6 @@ pub trait Consensus {
         let num_nodes = self.cluster_size();
         let has_majority = votes > num_nodes.div_euclid(2);
         has_majority || num_nodes.eq(&1)
-    }
-
-    fn count_votes(&mut self, votes: u64) {
-        if self.is_majority(votes) {
-            self.become_leader();
-            tracing::info!(
-                action = "becomeLeader",
-                term = self.current_term(),
-                votes = votes,
-                peers = self.cluster_size()
-            );
-        } else {
-            tracing::info!(
-                action = "notEnoughVotes",
-                term = self.current_term(),
-                votes = votes,
-                peers = self.cluster_size()
-            );
-        }
     }
 
     fn cluster_size(&self) -> u64;
@@ -300,31 +283,6 @@ mod tests {
         assert!(!state.is_majority(2));
         assert!(state.is_majority(3));
         assert!(state.is_majority(4));
-    }
-
-    #[test]
-    fn test_count_votes_becomes_leader_with_majority() {
-        let mut state = MockState::default();
-        state.cluster_size = 3;
-        state.count_votes(2);
-        assert_eq!(state.role(), &Role::Leader);
-    }
-
-    #[test]
-    fn test_count_votes_stays_candidate_without_majority() {
-        let mut state = MockState::default();
-        state.cluster_size = 5;
-        state.role = Role::Candidate;
-        state.count_votes(2);
-        assert_eq!(state.role(), &Role::Candidate);
-    }
-
-    #[test]
-    fn test_count_votes_single_node_becomes_leader() {
-        let mut state = MockState::default();
-        state.cluster_size = 1;
-        state.count_votes(1);
-        assert_eq!(state.role(), &Role::Leader);
     }
 
     #[test]
