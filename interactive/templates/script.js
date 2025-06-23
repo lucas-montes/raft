@@ -612,6 +612,7 @@ function initializeCrudForms() {
             e.preventDefault();
             const id = document.getElementById('read-id').value;
             await sendCrudRequest('Read', { id });
+            readForm.reset();
         });
     }
 

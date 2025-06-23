@@ -48,11 +48,12 @@ pub trait Consensus {
 
         if self.role() != &Role::Follower {
             self.become_follower(
-            Some(
-                SocketAddr::from_str(leader_id).expect("why leader_id isnt a correct socketaddrs?"),
-            ),
-            term,
-        );
+                Some(
+                    SocketAddr::from_str(leader_id)
+                        .expect("why leader_id isnt a correct socketaddrs?"),
+                ),
+                term,
+            );
         }
 
         let current_entries = &mut *self.log_entries();
